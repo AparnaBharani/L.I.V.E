@@ -1,12 +1,9 @@
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
-from typing import List
 
-from app import models, schemas
-from app.database import get_db
+from app.routers import experiences, interactions, users
 
-app = FastAPI()
+app = FastAPI(title="L.I.V.E API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -16,11 +13,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(users.router)
+app.include_router(experiences.router)
+app.include_router(interactions.router)
+
+
 @app.get("/")
 def home():
     return {"message": "L.I.V.E backend is running"}
-
-@app.get("/experiences", response_model=List[schemas.ExperienceResponse])
-def get_experiences(db: Session = Depends(get_db)):
-    experiences = db.query(models.Experience).all()
-    return experiences
