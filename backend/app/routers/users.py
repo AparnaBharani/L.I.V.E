@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, status
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from app.dependencies import DbSession, ExistingUser
+from app.dependencies import DbSession, ExistingUser, Limit, Offset
 from app.models import User
 from app.schemas import UserCreate, UserResponse
 
@@ -26,6 +27,13 @@ def create_user(payload: UserCreate, db: DbSession):
         raise
     db.refresh(user)  # load server-set values (id, created_at)
     return user
+
+
+@router.get("", response_model=list[UserResponse])
+def list_users(db: DbSession, limit: Limit = 50, offset: Offset = 0):
+    # Used by the frontend's demo-user picker (there is no authentication yet).
+    stmt = select(User).order_by(User.id).limit(limit).offset(offset)
+    return db.scalars(stmt).all()
 
 
 @router.get("/{user_id}", response_model=UserResponse)

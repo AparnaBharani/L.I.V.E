@@ -6,7 +6,7 @@ never make existing rows fail to serialise.
 """
 
 from datetime import datetime
-from typing import Annotated, Any, Self
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
@@ -109,3 +109,24 @@ class InteractionResponse(ResponseSchema):
     query_text: str | None
     properties: dict[str, Any] | None
     occurred_at: datetime
+
+
+# ---------- Recommendation (V2) ----------
+
+class RecommendationItem(ResponseSchema):
+    rank: int
+    score: float = Field(description="Final score in [0, 1] after the diversity adjustment; sets the order.")
+    relevance: float = Field(description="Weighted feature score in [0, 1] before the diversity adjustment.")
+    reasons: list[str] = Field(description="Deterministic explanations generated from the features.")
+    features: dict[str, float] = Field(description="Feature values in [0, 1] that produced the score.")
+    experience: ExperienceResponse
+
+
+class RecommendationsResponse(ResponseSchema):
+    user_id: int
+    strategy: Literal["personalized", "cold_start"] = Field(
+        description="cold_start = no behaviour yet; ranked by popularity and freshness only."
+    )
+    generated_at: datetime
+    candidate_count: int
+    items: list[RecommendationItem]
