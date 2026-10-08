@@ -16,6 +16,8 @@ eggs/
 .eggs/
 lib/
 lib64/
+# ...but frontend/lib holds the Next.js app's source, not Python build output.
+!frontend/lib/
 parts/
 sdist/
 var/

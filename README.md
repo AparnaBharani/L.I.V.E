@@ -1,169 +1,232 @@
 # L.I.V.E
-Learn · Interact · Venture · Experience - A social platform where every interaction leads somewhere.
 
-> **What if social media helped people live their lives instead of helping them escape them?**
-
-LIVE is an experimental social platform built around a simple shift: **from consuming content to experiencing life.**
-
-Instead of endlessly recommending things to watch, LIVE helps people discover things worth **learning, building, exploring, trying, and experiencing** — and gives those experiences a social layer.
-
-The fundamental unit of LIVE isn't a post.
-
-It's an **experience**.
-
----
-
-## The Idea
-
-Most social platforms are built around:
-
-**Discover → Consume → Scroll → Repeat**
-
-LIVE explores:
-
-**Discover → Do → Experience → Create → Connect**
-
-An experience could be anything from learning photography and building a project to exploring a new place, joining a challenge, trying something creative, or learning a skill from another person.
-
-The goal isn't to maximize time spent on the platform.
-
-It's to maximize **what users get out of that time.**
-
----
-
-## The Technical Challenge
-
-Building another social network isn't particularly interesting.
-
-Building a social network whose recommendation system is optimized for **meaningful action rather than passive engagement** is.
-
-Instead of asking:
-
-> *What will this user click on?*
-
-LIVE asks:
-
-> *What is this user likely to find valuable and actually do?*
-
-Every interaction becomes a signal.
-
-Users can discover, save, start, complete, rate, share, and create experiences. These interactions build a continuously evolving representation of the user's interests, skills, preferences, and behavior.
-
-The recommendation system then uses this representation to determine what the user might want to experience next.
-
----
-
-## AI & Recommendation
-
-LIVE combines **recommendation systems, semantic search, embeddings, contextual personalization, and generative AI**.
-
-Experiences are represented semantically rather than simply through keywords, allowing the system to discover relationships between seemingly different activities.
-
-Recommendations can consider:
-
-**User** — interests, skills, history, preferences and feedback.
-
-**Experience** — topics, difficulty, duration, cost, requirements and skills.
-
-**Context** — available time, location, environment and current intent.
-
-**Social Graph** — connections, communities and people with similar interests.
-
-Conceptually:
-
-`Recommendation = f(User, Experience, Context, History, Social Graph)`
-
-The system can progressively move from basic content-based recommendation toward collaborative filtering, personalized ranking, and learning-to-rank models.
-
----
-
-## Do Something
-
-One of LIVE's core interactions is:
-
-**What should I do right now?**
-
-A user could say:
-
-> *"I have 20 minutes and want to do something creative."*
-
-The system interprets the intent, extracts constraints, performs semantic retrieval, and ranks experiences based on the user's profile and current context.
-
-This creates a pipeline of:
-
-**Natural Language → Intent → Semantic Search → Candidate Generation → Ranking → Recommendation**
-
-The LLM is not the product. It is one component of a larger intelligent system.
-
----
-
-## Engineering
-
-LIVE is being built as a full-stack AI system.
-
-**Frontend**
-
-Next.js · React · TypeScript
-
-**Backend**
-
-Python · FastAPI · REST APIs
-
-**Data**
-
-PostgreSQL · Redis · Vector Search
-
-**AI / ML**
-
-Embeddings · Semantic Search · Recommendation Systems · Learning-to-Rank · LLMs
-
-**Infrastructure**
-
-Docker · Background Workers · CI/CD · Cloud
-
-User interactions are captured as events, creating the feedback loop required for personalization and recommendation experiments.
-
-**User → Recommendation → Action → Feedback → User Model → Better Recommendation**
-
----
-
-## Measuring Value
-
-LIVE deliberately looks beyond traditional engagement metrics.
-
-Instead of optimizing only for clicks, views, or session duration, the system can experiment with signals such as:
-
-* Experience starts
-* Experience completion
-* User-reported value
-* Creation
-* Social participation
-* Discovery-to-action conversion
-* Novelty and diversity
-
-One particularly important question is:
-
-> **Was this experience worth your time?**
-
-That answer can become a powerful signal for a recommendation system designed around value rather than attention.
-
----
-
-## The Bigger Question
-
-Social media has become very good at answering:
-
-> **"What should I look at next?"**
-
-LIVE asks:
-
-> **"What should I do next?"**
-
-The long-term vision is a social graph built around what people **learn, build, explore, experience, and create**.
-
-And perhaps the best measure of success is not how long someone stays on LIVE.
-
-It's whether they discover something that makes them want to **close the app and go live it.**
-
-**LIVE — Learn · Interact · Venture · Experience**
-
+**Learn · Interact · Venture · Experience.** A platform that recommends *actionable experiences*
+(things to do, learn, try) instead of passive content, and learns from what people actually do.
+
+The product vision is in [docs/VISION.md](docs/VISION.md). This README is the technical guide.
+
+## Status
+
+| Version | Scope | State |
+|---|---|---|
+| V0 | Full-stack foundation: Next.js, FastAPI, PostgreSQL, SQLAlchemy, Alembic | done |
+| V1 | Users + interaction/event log, validated API, tests, seed data, frontend event tracking | done |
+| V2 | Rule/feature-based recommendation engine (no ML/LLM) | next |
+| V3+ | NLP, hybrid retrieval, LLM reasoning, learned ranking, knowledge graph, production | planned |
+
+## Architecture (V1)
+
+```
+ Browser
+    │  (React client components, demo-user picker)
+    ▼
+ Next.js 16 (frontend/)          lib/api.ts ── the only module that calls fetch()
+    │  REST / JSON over HTTP     lib/events.ts ── event helpers + state derived from the log
+    ▼
+ FastAPI (backend/app/)
+    main.py ── CORS, includes routers
+    routers/users.py · experiences.py · interactions.py
+    dependencies.py ── DbSession (Depends(get_db)), get_or_404, ExistingUser, pagination
+    schemas.py ── Pydantic request (validate) / response (serialise) models
+    │  SQLAlchemy 2.x ORM, psycopg 3
+    ▼
+ PostgreSQL
+    users ─────────┐
+    experiences ───┤
+    interactions ──┘  append-only event log (FK → users, FK → experiences)
+    alembic_version   which migration is applied
+```
+
+**Layers.** Routers handle HTTP (status codes, 404/409). Pydantic schemas validate what clients
+send and shape what they receive. ORM models describe tables. The database enforces the same
+invariants again with constraints, so no write path can store invalid events.
+
+## Repository layout
+
+```
+backend/
+  app/            FastAPI application (config, database, models, enums, schemas, routers)
+  alembic/        migrations (versions/*.py)
+  scripts/seed.py demo data for the development database
+  tests/          pytest: schemas, API, database, seed (isolated test database)
+frontend/
+  app/            pages: / (catalogue), /experiences/[id], /history
+  components/     cards, header, demo-user context, data hooks
+  lib/            api client, event helpers, types, formatting
+docs/VISION.md    product vision
+```
+
+## Setup
+
+Requirements: Python 3.13, Node 22, PostgreSQL 16+ (developed on 18).
+
+### 1. PostgreSQL
+
+Create the development database (the test database is created automatically by pytest):
+
+```sql
+CREATE DATABASE live_db;
+```
+
+### 2. Backend
+
+```powershell
+cd backend
+python -m venv venv
+.\venv\Scripts\Activate.ps1          # macOS/Linux: source venv/bin/activate
+pip install -r requirements-dev.txt  # app deps + pytest + httpx2
+copy .env.example .env               # then edit both URLs (URL-encode special characters, "@" -> "%40")
+alembic upgrade head                 # create tables
+python -m scripts.seed               # demo users, experiences, interaction histories
+uvicorn app.main:app --reload        # http://127.0.0.1:8000, docs at /docs
+```
+
+`backend/.env` (git-ignored):
+
+| Variable | Used by | Notes |
+|---|---|---|
+| `DATABASE_URL` | app, Alembic, seed | `postgresql+psycopg://USER:PASSWORD@localhost:5432/live_db` |
+| `TEST_DATABASE_URL` | pytest only | must name a different database ending in `_test`; **dropped and recreated on every test run** |
+
+### 3. Frontend
+
+```powershell
+cd frontend
+npm install
+npm run dev                          # http://localhost:3000
+```
+
+Optional `frontend/.env.local`: `NEXT_PUBLIC_API_URL` (default `http://127.0.0.1:8000`). It is
+inlined into the browser bundle at build time, so it must never contain secrets. The backend's CORS
+setting allows `http://localhost:3000` and `http://127.0.0.1:3000`.
+
+## Database migrations (Alembic)
+
+```powershell
+alembic current                                  # applied revision
+alembic upgrade head                             # apply all migrations
+alembic downgrade -1                             # undo the latest one
+alembic revision --autogenerate -m "describe change"   # draft a migration from model changes
+alembic check                                    # fails if models and database differ
+```
+
+Always read an autogenerated migration before applying it. Autogenerate does not compare server
+defaults or CHECK-constraint text, and can mistake a rename for drop + add.
+`alembic/env.py` takes the URL from `DATABASE_URL` and escapes `%` for configparser.
+
+| Revision | Change |
+|---|---|
+| `fd7484a41540` | `experiences` table |
+| `06797c060046` | `users`, `interactions` (+ CHECKs, FKs, indexes); `experiences.created_at`; `cost` server default |
+
+## Seed data
+
+```powershell
+python -m scripts.seed           # create whatever demo data is missing (safe to re-run)
+python -m scripts.seed --reset   # also rebuild the demo users' interaction histories
+```
+
+- 42 experiences across `outdoors`, `adventure`, `creative`, `social`, `learning` and `wellness`.
+- 14 users named `demo_*`, with scripted behaviour profiles: outdoor, adventure, creative ×2,
+  social ×2, wellness ×2, learning ×2, mixed ×2, and **2 cold-start users with no events**.
+- About 340 interactions over the last 70 days. Loved categories get
+  `view → click → save → like → complete` (with occasional `unsave`), tolerated ones get
+  `view → click (→ save)`, avoided ones get `view → skip/dislike`. Each profile also has a search.
+- Deterministic: a per-user seeded RNG produces the same histories on every run.
+- Safety: refuses databases whose name ends in `_test`. It only touches `demo_*` users and its own
+  catalogue titles, and only generates a history for a demo user who has none.
+
+## Tests
+
+```powershell
+cd backend
+pytest                    # whole suite
+pytest tests/test_api_interactions.py -v
+```
+
+| File | Covers |
+|---|---|
+| `test_schemas.py` | Pydantic validation rules (no database) |
+| `test_api_users.py`, `test_api_experiences.py`, `test_api_interactions.py` | the HTTP API through FastAPI's `TestClient` |
+| `test_database.py` | constraints, FKs, cascade, JSONB, schema built by Alembic, isolation |
+| `test_seed.py` | seed safety, idempotence, determinism, profile coherence |
+
+**Isolation.** `tests/conftest.py` refuses to run unless `TEST_DATABASE_URL` is set, ends in `_test`
+and differs from `DATABASE_URL`. It then sets `DATABASE_URL` to the test URL *before* importing the
+app, so the app's own engine points at the test database. Once per run, the test database is
+dropped, recreated and migrated with `alembic upgrade head`. Each test runs in a transaction
+that is rolled back (`join_transaction_mode="create_savepoint"` turns the routes' `commit()` into
+`RELEASE SAVEPOINT`), and `get_db` is overridden to hand the routes that same session.
+
+Frontend checks: `npm run lint`, `npx tsc --noEmit`, `npm run build`.
+
+## API
+
+Interactive docs: `http://127.0.0.1:8000/docs`. List endpoints take `limit` (1–100, default 50)
+and `offset` (≥ 0).
+
+| Method | Path | Body | Success | Errors |
+|---|---|---|---|---|
+| GET | `/` | – | 200 health message | |
+| POST | `/users` | `{username}` (3–50 chars, `[A-Za-z0-9_]`) | 201 user | 409 taken, 422 |
+| GET | `/users` | – | 200 list (id order) | 422 |
+| GET | `/users/{user_id}` | – | 200 user | 404, 422 |
+| POST | `/experiences` | title, description, category, difficulty, duration_minutes (>0), cost (≥0, default 0) | 201 experience | 422 |
+| GET | `/experiences` | – | 200 list (id order) | 422 |
+| GET | `/experiences/{experience_id}` | – | 200 experience | 404, 422 |
+| POST | `/users/{user_id}/interactions` | `{event_type, experience_id?, query_text?, properties?}` | 201 event | 404 user/experience, 422 |
+| GET | `/users/{user_id}/interactions` | – | 200 list, newest first | 404, 422 |
+
+Unknown fields are rejected (`422 extra_forbidden`), so clients cannot set `id`, `user_id`,
+`created_at` or `occurred_at`. Integers must be real JSON integers. Errors use FastAPI's format:
+`{"detail": "..."}`, or a list of validation errors for 422. Path dependencies run before body
+validation, so a bad body sent to an unknown user returns 404.
+
+## Interaction / event model
+
+`interactions` is an **append-only log**: one row per action, never updated. Current state, such as
+"is this saved?", is derived by replaying events, where the latest `save`/`unsave` wins.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | bigint PK | |
+| `user_id` | FK → users, `ON DELETE CASCADE` | taken from the URL, never from the body |
+| `experience_id` | FK → experiences, nullable, cascade | NULL only for `search` |
+| `event_type` | varchar(32) + CHECK | one of the 10 types below |
+| `query_text` | text, nullable | required for `search`, forbidden otherwise |
+| `properties` | JSONB, nullable | flat map ≤ 20 keys, scalar values, e.g. `{"source":"catalogue","position":3}` |
+| `occurred_at` | timestamptz, server default `now()` | set by the server |
+
+| Event | Kind | Meaning |
+|---|---|---|
+| `view` | implicit | experience detail shown |
+| `click` | implicit | opened from a list (`properties.position` = rank in that list) |
+| `save` / `unsave` | implicit | bookmark toggled (reversal recorded as its own event) |
+| `like` / `unlike` | explicit | positive feedback toggled |
+| `dislike` | explicit | negative feedback |
+| `complete` | implicit (strong) | user did the experience |
+| `skip` | implicit (negative) | "not for me" |
+| `search` | intent | free-text query, no experience |
+
+Rules are enforced twice: in `InteractionCreate` (Pydantic, for clear 422 messages) and in the
+CHECK constraints `ck_interactions_event_type_valid` / `ck_interactions_event_shape` (the
+database's guarantee). Indexes: `(user_id, occurred_at)` for history,
+`(experience_id, event_type)` for popularity.
+
+## How a frontend action reaches PostgreSQL
+
+```
+click "Save" on a card (components/ExperienceCard.tsx)
+  → page's onEvent → useActivity().record({event_type: "save", experience_id, properties: {source, position}})
+  → lib/api.ts createInteraction → POST {API_URL}/users/{id}/interactions   (no user_id in body)
+  → FastAPI: CORS → interactions router → ExistingUser dependency (404?) → InteractionCreate (422?)
+           → experience exists? (404) → INSERT INTO interactions … → 201 + JSON
+  → useActivity prepends the returned event → deriveState() recomputes saved/liked → button shows "Saved ✓"
+```
+
+Frontend event sources: title link → `click`, detail page mount → `view` (guarded against React
+Strict Mode's double effect), card/detail buttons → `save/unsave/like/unlike/dislike/complete/skip`,
+search form → `search`. The `/history` page reads `GET /users/{id}/interactions`.
+
+**Demo mode.** There is no authentication: the header dropdown picks which user you act as, and
+any client can post events for any user. That is deliberate for V1 and replaced by real auth in V8.
