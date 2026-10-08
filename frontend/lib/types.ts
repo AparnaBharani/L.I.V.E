@@ -41,6 +41,24 @@ export interface Interaction {
   occurred_at: string;
 }
 
+// V2: GET /users/{id}/recommendations
+export interface RecommendationItem {
+  rank: number;
+  score: number; // after diversity adjustment; sets the order
+  relevance: number; // weighted feature score before diversity
+  reasons: string[];
+  features: Record<string, number>;
+  experience: Experience;
+}
+
+export interface RecommendationsResponse {
+  user_id: number;
+  strategy: "personalized" | "cold_start";
+  generated_at: string;
+  candidate_count: number;
+  items: RecommendationItem[];
+}
+
 // What the client is allowed to send (backend InteractionCreate). There is no
 // user_id, id or occurred_at: the URL names the user, the server sets the rest.
 // The union mirrors the backend rule: search has a query, everything else an experience.

@@ -11,10 +11,10 @@ The product vision is in [docs/VISION.md](docs/VISION.md). This README is the te
 |---|---|---|
 | V0 | Full-stack foundation: Next.js, FastAPI, PostgreSQL, SQLAlchemy, Alembic | done |
 | V1 | Users + interaction/event log, validated API, tests, seed data, frontend event tracking | done |
-| V2 | Rule/feature-based recommendation engine (no ML/LLM) | next |
+| V2 | Rule/feature-based recommendation engine (no ML/LLM), offline evaluation, "For You" UI | done, see [V2](#v2-recommendation-engine) |
 | V3+ | NLP, hybrid retrieval, LLM reasoning, learned ranking, knowledge graph, production | planned |
 
-## Architecture (V1)
+## Architecture (V1, extended by [V2](#v2-recommendation-engine))
 
 ```
  Browser
@@ -25,7 +25,8 @@ The product vision is in [docs/VISION.md](docs/VISION.md). This README is the te
     ▼
  FastAPI (backend/app/)
     main.py ── CORS, includes routers
-    routers/users.py · experiences.py · interactions.py
+    routers/users.py · experiences.py · interactions.py · recommendations.py (V2)
+    recommender/ ── V2 engine: profile → candidates → features → score → diversify → explain
     dependencies.py ── DbSession (Depends(get_db)), get_or_404, ExistingUser, pagination
     schemas.py ── Pydantic request (validate) / response (serialise) models
     │  SQLAlchemy 2.x ORM, psycopg 3
@@ -46,9 +47,11 @@ invariants again with constraints, so no write path can store invalid events.
 ```
 backend/
   app/            FastAPI application (config, database, models, enums, schemas, routers)
+  app/recommender/  V2 recommendation engine (pure pipeline + DB-loading service)
   alembic/        migrations (versions/*.py)
-  scripts/seed.py demo data for the development database
-  tests/          pytest: schemas, API, database, seed (isolated test database)
+  scripts/seed.py      demo data for the development database
+  scripts/evaluate.py  offline recommender evaluation (read-only)
+  tests/          pytest: schemas, API, database, seed, recommender, evaluation (isolated test database)
 frontend/
   app/            pages: / (catalogue), /experiences/[id], /history
   components/     cards, header, demo-user context, data hooks
@@ -150,6 +153,7 @@ pytest tests/test_api_interactions.py -v
 | `test_api_users.py`, `test_api_experiences.py`, `test_api_interactions.py` | the HTTP API through FastAPI's `TestClient` |
 | `test_database.py` | constraints, FKs, cascade, JSONB, schema built by Alembic, isolation |
 | `test_seed.py` | seed safety, idempotence, determinism, profile coherence |
+| `test_recommender.py`, `test_api_recommendations.py`, `test_evaluation.py` | V2, see [Testing V2](#10-testing-v2) |
 
 **Isolation.** `tests/conftest.py` refuses to run unless `TEST_DATABASE_URL` is set, ends in `_test`
 and differs from `DATABASE_URL`. It then sets `DATABASE_URL` to the test URL *before* importing the
@@ -176,6 +180,7 @@ and `offset` (≥ 0).
 | GET | `/experiences/{experience_id}` | – | 200 experience | 404, 422 |
 | POST | `/users/{user_id}/interactions` | `{event_type, experience_id?, query_text?, properties?}` | 201 event | 404 user/experience, 422 |
 | GET | `/users/{user_id}/interactions` | – | 200 list, newest first | 404, 422 |
+| GET | `/users/{user_id}/recommendations` | – (`limit` 1–50, default 10) | 200 ranked list + strategy + reasons (V2) | 404, 422 |
 
 Unknown fields are rejected (`422 extra_forbidden`), so clients cannot set `id`, `user_id`,
 `created_at` or `occurred_at`. Integers must be real JSON integers. Errors use FastAPI's format:
@@ -230,3 +235,214 @@ search form → `search`. The `/history` page reads `GET /users/{id}/interaction
 
 **Demo mode.** There is no authentication: the header dropdown picks which user you act as, and
 any client can post events for any user. That is deliberate for V1 and replaced by real auth in V8.
+
+---
+
+## V2: Recommendation engine
+
+### The problem
+
+`GET /users/{user_id}/recommendations` answers *"given what this user has done, which experiences
+are most relevant now?"* It uses only V1's structured data (experience attributes plus the
+interaction log). It uses no ML, embeddings, LLMs or external services, and every score can be
+explained.
+
+### Architecture
+
+```
+ GET /users/{id}/recommendations        routers/recommendations.py   HTTP only (404, 422, response shape)
+            │
+ recommender/service.py                 recommend_for_user(): load experiences, the user's events and
+            │                           fan counts from PostgreSQL, then call the pure pipeline:
+            │
+            │  recommend(experiences, user_events, fans, now, config)
+            ├── profile.py      events ──► UserProfile (recency-weighted category/item affinity,
+            │                              preferred difficulty/duration/cost, saved/liked/disliked/completed)
+            ├── candidates.py   catalogue − completed − disliked ──► candidate pool
+            ├── scoring.py      8 features per candidate, each in [0, 1] ──► weighted score
+            ├── ranking.py      sort (score, id) ──► greedy category-diversity re-rank ──► page (limit/offset)
+            └── explain.py      feature values ──► templated reasons
+ recommender/config.py                  every weight and constant (RecommenderConfig)
+ recommender/evaluation.py              temporal hold-out + Precision/Recall/NDCG@K + baselines
+```
+
+Only `service.py` touches the database. Every other stage is a pure function of plain dataclasses,
+which is why they can be unit-tested with a fixed clock and why the offline evaluation runs the
+*same* code as the API. Retrieval (candidates) is separate from ranking (scoring), so V4 can add
+keyword/vector candidate sources without touching scoring.
+
+### 1. User profile (`profile.py`)
+
+Each experience-linked event contributes a **signal** = `event_weight × recency_weight`.
+
+| Event | Weight | | Event | Weight |
+|---|---|---|---|---|
+| view | +1 | | unsave | −4 (cancels a save) |
+| click | +2 | | unlike | −5 (cancels a like) |
+| save | +4 | | skip | −3 |
+| like | +5 | | dislike | −5 |
+| complete | +6 | | search | 0 (no experience; text is used from V3 on) |
+
+**Recency:** `recency_weight = 0.5 ** (age_days / 30)`. An event loses half its influence every
+30 days (1.0 today, 0.5 after a month, 0.25 after two). Future timestamps count as "now".
+
+From the signals:
+- **Category affinity** ∈ [−1, 1] = category sum / max(strongest category sum, **10**). Dividing by
+  the strongest category makes long and short histories comparable. The evidence floor of 10
+  (about view + click + save + like) stops one view from looking like certainty. A test caught this
+  bug: one view used to give a category full weight.
+- **Item affinity** = raw signal sum per experience.
+- **Preferred difficulty / duration / cost**: averages over the experiences with *positive* item
+  affinity, weighted by that affinity (duration uses a geometric mean, because durations compare
+  as ratios). If the user has no positive history, these stay `None` (unknown).
+- **State** replayed from the log (latest event wins): saved, liked, disliked, completed, seen.
+
+A user with no experience-linked events is **cold start**.
+
+### 2. Candidate generation (`candidates.py`)
+
+All experiences, minus those the user **completed** and those they **currently dislike** (a later
+`like` lifts a dislike). Both exclusions are configurable. Skipped items stay in, but are penalised
+through their features. The response reports `candidate_count`.
+
+### 3. Features (`scoring.py`)
+
+Every feature is in [0, 1], so no feature dominates because its raw numbers are bigger. For
+preference features, 0.5 means "no information".
+
+| Feature | Weight | Definition |
+|---|---|---|
+| `category_match` | 0.40 | (category affinity + 1) / 2; unseen category = 0.5 |
+| `interaction_preference` | 0.15 | (tanh(item affinity / 5) + 1) / 2; e.g. saved-but-not-done is high, skipped is low |
+| `difficulty_match` | 0.10 | 1 − \|level − preferred level\| / 2 on beginner=0, intermediate=1, advanced=2 |
+| `duration_match` | 0.10 | min(d, preferred) / max(d, preferred): 120 vs 60 min → 0.5 |
+| `cost_match` | 0.10 | 1 if cost ≤ preferred, else (preferred + 100) / (cost + 100) |
+| `popularity` | 0.05 | log(1 + fans) / log(1 + max fans); fans = distinct users who saved/liked/completed |
+| `freshness` | 0.05 | 0.5 ** (days since created / 60) |
+| `novelty` | 0.05 | 1 if the user never interacted with it, else 0 |
+
+### 4. Scoring and ranking
+
+`relevance = Σ wᵢ·fᵢ / Σ wᵢ` ∈ [0, 1]. Candidates are sorted by relevance, with **ties broken by
+experience id**, so the output is deterministic.
+
+**Diversity** (`ranking.py`): a greedy re-rank picks, at each position, the candidate that maximises
+`relevance × 0.9 ^ (items already picked from its category)`. A second item from a category must be
+about 11% more relevant than the best item from an unused category to take the slot, and a third
+about 23% more. A strong preference can still fill several slots; a weak one can't. `score` in the
+response is this adjusted value (it sets the order); `relevance` is the value before adjustment.
+`offset` pages through the same diversified list.
+
+### 5. Cold start
+
+Users with no behaviour get `strategy: "cold_start"`. They are ranked by **popularity (0.6) and
+freshness (0.4) only**, with the same diversity re-rank (so the list covers several categories).
+The response, the reasons ("a popular starting point while we learn what you like") and the UI
+("Popular picks to get you started") all say this is **not** personalised. One positive
+interaction switches the user to `personalized`.
+
+### 6. Reasons (`explain.py`)
+
+Each reason is a fixed template, offered only when its feature is clearly strong (e.g.
+`category_match ≥ 0.75` → "matches your interest in outdoors", saved → "you saved this earlier",
+an unseen category → "something new for you: wellness"). Reasons are ordered by their feature's
+contribution `wᵢ·fᵢ`, with at most 3. No LLM is involved, and the response also exposes the raw
+`features`.
+
+### 7. API
+
+`GET /users/{user_id}/recommendations?limit=10&offset=0` (`limit` 1–50, `offset` ≥ 0). 404 for an
+unknown user. Read-only: generating recommendations writes nothing.
+
+Real response for the seeded user `demo_outdoor_maya` (`?limit=1`, experience fields shortened):
+
+```json
+{
+  "user_id": 10, "strategy": "personalized", "generated_at": "2026-10-07T18:40:38.074775Z", "candidate_count": 41,
+  "items": [{
+    "rank": 1, "score": 0.8581, "relevance": 0.8581,
+    "reasons": ["matches your interest in outdoors", "you saved this earlier", "free"],
+    "features": {"category_match": 1.0, "interaction_preference": 0.94, "difficulty_match": 0.7543,
+                 "duration_match": 0.6586, "cost_match": 1.0, "popularity": 0.7925, "freshness": 0.7234, "novelty": 0.0},
+    "experience": {"id": 15, "title": "Coastal cleanup and beach walk", "category": "outdoors",
+                   "difficulty": "beginner", "duration_minutes": 180, "cost": 0, "...": "..."}
+  }]
+}
+```
+
+### 8. Evaluation (`python -m scripts.evaluate`)
+
+**Protocol: temporal leave-last-out.** A *positive* experience is one the user saved, liked or
+completed. For each user with at least 4 positives, the **2 most recent positive experiences are
+held out**. The cutoff is the first event of any kind on a held-out item. The profile **and**
+popularity are rebuilt from events before the cutoff only, so no future data leaks in. Then we ask:
+*would V2's top K, generated at the cutoff, have contained what the user went on to engage with?*
+
+- **Precision@K**: share of the K recommendations that were held-out positives.
+- **Recall@K**: share of the held-out positives found in the top K.
+- **NDCG@K**: like recall, but a hit at rank 1 counts more than a hit at rank K (1/log₂(rank+1)), normalised to [0, 1].
+- **Coverage@K**: share of the catalogue appearing in anyone's top K. **Categories@K**: distinct categories per list.
+
+Results on the seeded data (42 experiences, 343 events, 11 evaluable users):
+
+| K=5 | Precision | Recall | NDCG | Coverage | Categories |
+|---|---|---|---|---|---|
+| random (mean of 20 seeds) | 0.046 | 0.116 | 0.084 | 0.749 | 3.67 |
+| popularity | 0.018 | 0.045 | 0.022 | 0.310 | 3.27 |
+| V2 without diversity | 0.273 | 0.682 | 0.534 | 0.810 | 1.73 |
+| **V2 (default)** | **0.182** | **0.455** | **0.392** | 0.571 | **3.64** |
+
+| K=10 | Precision | Recall | NDCG | Coverage | Categories |
+|---|---|---|---|---|---|
+| random | 0.050 | 0.250 | 0.136 | 0.964 | 5.25 |
+| popularity | 0.018 | 0.091 | 0.041 | 0.452 | 5.18 |
+| V2 without diversity | 0.145 | 0.727 | 0.554 | 0.905 | 3.64 |
+| **V2 (default)** | **0.118** | **0.591** | **0.447** | 0.714 | **5.55** |
+
+What the numbers say:
+- V2 finds held-out positives about **4× more often than random at K=5**, and popularity is *worse*
+  than random. Generic popular items aren't what a specific person goes on to do.
+- **Diversity costs accuracy.** Turning it off raises Recall@5 from 0.46 to 0.68 but collapses the
+  list to ~1.7 categories. The default (decay 0.9) is a deliberate middle point. The sweep that
+  chose it (category weight 0.30–0.50 × decay 0.85–1.0) ran **on this same data**, so these figures
+  are optimistic.
+- `tests/test_evaluation.py` re-runs this on freshly seeded test data and fails if V2 stops beating
+  both baselines.
+
+**Limitations:** the data is **synthetic**. The seed script generates behaviour from category
+preferences, which is exactly what V2 models, so good scores are partly built in. There are only
+11 evaluable users and 2 held-out items each, so one user changes recall by about 0.05. Offline
+hit-rate is not user value. Real validation needs real users, online signals (completion after
+recommendation) and more held-out data.
+
+### 9. Frontend flow
+
+The catalogue page (`/`) shows **For You** above the full catalogue (`components/ForYou.tsx`):
+6 recommendations with rank, score and reasons. Interacting with a recommended card posts a normal
+V1 event with `properties = {source: "recommendations", position, strategy}`. That changes the
+user's newest event id, which triggers a re-fetch, so the loop is visible immediately:
+
+```
+recommendation ─► user action ─► POST /users/{id}/interactions ─► event log
+      ▲                                                               │
+      └──── GET /users/{id}/recommendations ◄── profile rebuilt ◄─────┘
+```
+
+### 10. Testing V2
+
+| File | Tests |
+|---|---|
+| `test_recommender.py` | pure pipeline with a fixed clock: history size, every feedback type, unsave/unlike, recency, category/difficulty/cost/duration preferences, cold start, diversity, candidate exclusion, determinism, pagination, features in [0, 1], reasons, metric maths, hold-out without leakage |
+| `test_api_recommendations.py` | API on the test database: outdoor/creative/wellness users get their category first, different users get different lists, the event → recommendation loop, cold start, exclusions, skipped categories sink, response schema, determinism, pagination, 404, 422, read-only |
+| `test_evaluation.py` | V2 beats random and popularity on seeded test data; top 5 keeps ≥ 3 categories |
+
+### 11. Limitations of V2 (by design, for later versions)
+
+- **Hand-set weights.** They are starting values, tuned lightly on synthetic data. Learning them is V6.
+- **Category is the only notion of similarity.** "Pottery" and "ceramics" are unrelated unless they
+  share a category, and search text is ignored. That's V3 (NLP/embeddings) and V4 (hybrid retrieval).
+- **No collaborative signal** beyond global popularity ("people like you also did…").
+- **Popularity ignores later unsave/unlike** and counts all time equally.
+- **Full scan:** every request scores the whole catalogue (fine for 42 items, not for 100k). The
+  candidate stage is where V4's retrieval will narrow this.
+- **No context** (time of day, location, weather) and no notion of "already shown but ignored".

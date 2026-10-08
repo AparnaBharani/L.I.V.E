@@ -76,7 +76,7 @@ export function ExperienceActions({ state, onEvent, disabled }: Omit<Props, "exp
 
 export function ExperienceCard({ experience, state, onEvent, disabled, children }: Props) {
   return (
-    <article className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4" data-experience-id={experience.id}>
+    <article className="flex flex-col gap-3 rounded-lg border border-zinc-200 bg-white p-4" data-experience-id={experience.id} data-category={experience.category}>
       <div>
         <Link
           href={`/experiences/${experience.id}`}

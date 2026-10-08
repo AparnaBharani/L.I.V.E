@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { useDemoUser } from "@/components/DemoUserProvider";
 import { ExperienceCard } from "@/components/ExperienceCard";
+import { ForYou } from "@/components/ForYou";
 import { Empty, ErrorMessage, Loading } from "@/components/Status";
 import { useActivity } from "@/components/useActivity";
 import { useExperiences } from "@/components/useExperiences";
@@ -37,7 +38,18 @@ export default function CataloguePage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6">
-      <h1 className="text-2xl font-bold">Experiences</h1>
+      {activity.error && <ErrorMessage message={`Could not load your activity: ${activity.error}`} />}
+      {/* Wait for the history so the first recommendation request already sees the latest event. */}
+      {user && activity.interactions !== null && (
+        <ForYou
+          userId={user.id}
+          latestEventId={activity.interactions?.[0]?.id ?? null}
+          states={activity.states}
+          record={activity.record}
+        />
+      )}
+
+      <h1 className="mt-10 text-2xl font-bold">All experiences</h1>
       <p className="mt-1 text-sm text-zinc-600">Things to learn, build, explore and try. Every action below is logged as an event.</p>
 
       <form onSubmit={submitSearch} className="mt-4 flex gap-2">

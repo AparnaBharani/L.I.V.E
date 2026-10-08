@@ -1,5 +1,5 @@
 // The only place the frontend talks HTTP to the backend.
-import type { Experience, Interaction, NewInteraction, User } from "./types";
+import type { Experience, Interaction, NewInteraction, RecommendationsResponse, User } from "./types";
 
 // Inlined at build time by Next.js (NEXT_PUBLIC_ prefix). See frontend/.env.example.
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -41,6 +41,8 @@ export const api = {
   listUsers: () => request<User[]>("/users?limit=100"),
   listExperiences: () => request<Experience[]>("/experiences?limit=100"),
   getExperience: (id: number) => request<Experience>(`/experiences/${id}`),
+  getRecommendations: (userId: number, limit = 6) =>
+    request<RecommendationsResponse>(`/users/${userId}/recommendations?limit=${limit}`),
   listInteractions: (userId: number) =>
     request<Interaction[]>(`/users/${userId}/interactions?limit=100`),
   createInteraction: (userId: number, event: NewInteraction) =>
