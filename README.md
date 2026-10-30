@@ -371,6 +371,12 @@ preference features, 0.5 means "no information".
 | `popularity` | 0.05 | log(1 + fans) / log(1 + max fans); fans = users who currently have a save, like or completion in effect |
 | `freshness` | 0.05 | 0.5 ** (days since created / 60) |
 | `novelty` | 0.05 | 1 if the user never interacted with it, else 0 |
+| `semantic_match` | 0.15 | cosine similarity to the user's taste vector, stretched to [0, 1] |
+
+The **taste vector** is the average embedding of experiences with positive affinity, weighted by
+that affinity. It gives similarity beyond category: pottery can lead to block printing. Weights are
+normalised by their sum, and a feature set to 0 is switched off. Without embeddings the feature is
+neutral, so recommendations still work.
 
 ### 4. Scoring and ranking
 
@@ -438,27 +444,31 @@ Results on the seeded data (42 experiences, 343 events, 11 evaluable users):
 
 | K=5 | Precision | Recall | NDCG | Coverage | Categories |
 |---|---|---|---|---|---|
-| random (mean of 20 seeds) | 0.046 | 0.116 | 0.084 | 0.749 | 3.67 |
+| random (mean of 20 seeds) | 0.056 | 0.141 | 0.106 | 0.761 | 3.74 |
 | popularity | 0.036 | 0.091 | 0.046 | 0.262 | 3.09 |
-| V2 without diversity | 0.273 | 0.682 | 0.531 | 0.786 | 1.73 |
-| **V2 (default)** | **0.164** | **0.409** | **0.378** | 0.524 | **3.82** |
+| rules only (V2 baseline) | 0.164 | 0.409 | 0.378 | 0.524 | 3.82 |
+| **current** (with `semantic_match`) | **0.200** | **0.500** | **0.409** | 0.595 | **3.27** |
+| current without diversity | 0.273 | 0.682 | 0.524 | 0.833 | 1.64 |
 
 | K=10 | Precision | Recall | NDCG | Coverage | Categories |
 |---|---|---|---|---|---|
-| random | 0.050 | 0.250 | 0.136 | 0.964 | 5.25 |
+| random | 0.052 | 0.259 | 0.152 | 0.958 | 5.20 |
 | popularity | 0.018 | 0.091 | 0.046 | 0.452 | 5.00 |
-| V2 without diversity | 0.145 | 0.727 | 0.551 | 0.881 | 3.91 |
-| **V2 (default)** | **0.109** | **0.545** | **0.437** | 0.762 | **5.64** |
+| rules only (V2 baseline) | 0.109 | 0.545 | 0.437 | 0.762 | 5.64 |
+| **current** | **0.118** | **0.591** | **0.444** | 0.786 | **5.73** |
+| current without diversity | 0.145 | 0.727 | 0.544 | 0.929 | 3.55 |
 
 What the numbers say:
-- V2 finds held-out positives about **3.5× more often than random at K=5**, and popularity is *worse*
-  than random. Generic popular items aren't what a specific person goes on to do.
-- Making reversals and repeats correct moved V2's Recall@5 from 0.455 to 0.409. That is one held-out
-  item out of 22, which is noise at this sample size, so the weights were deliberately not re-tuned.
-- **Diversity costs accuracy.** Turning it off raises Recall@5 from 0.41 to 0.68 but collapses the
-  list to ~1.7 categories. The default (decay 0.9) is a deliberate middle point. The sweep that
-  chose it (category weight 0.30–0.50 × decay 0.85–1.0) ran **on this same data**, so these figures
-  are optimistic.
+- The recommender finds held-out positives about **3.5× more often than random at K=5**, and
+  popularity is worse than random. Generic popular items aren't what a specific person does next.
+- **`semantic_match` was adopted under a rule set before running the experiment**: beat the baseline
+  by more than one held-out item on Recall@5 or NDCG@5 without lowering the other. Weight 0.15 passed
+  (+2 of 22 items); 0.30 failed because NDCG fell. It costs some variety (3.82 to 3.27 categories).
+- Making reversals and repeats correct moved the baseline's Recall@5 from 0.455 to 0.409, one
+  held-out item, which is noise at this size. The weights were deliberately not re-tuned to recover it.
+- **Diversity costs accuracy.** Turning it off raises Recall@5 from 0.50 to 0.68 but collapses lists
+  to about 1.6 categories. The default is a deliberate middle point, and the sweep that chose it
+  ran on this same data, so these figures are optimistic.
 - `tests/test_evaluation.py` re-runs this on freshly seeded test data and fails if V2 stops beating
   both baselines.
 
@@ -491,13 +501,10 @@ recommendation ─► user action ─► POST /users/{id}/interactions ─► ev
 
 ### 11. Limitations of V2 (by design, for later versions)
 
-- **Hand-set weights.** They are starting values, tuned lightly on synthetic data. Learning them is V6.
-- **Category is the only notion of similarity.** "Pottery" and "ceramics" are unrelated unless they
-  share a category, and search text is ignored. That's V3 (NLP/embeddings) and V4 (hybrid retrieval).
+- **Hand-set weights**, tuned lightly on synthetic data. Learning them needs real interaction data.
 - **No collaborative signal** beyond global popularity ("people like you also did…").
 - **Popularity counts all time equally**, with no decay for old fans.
-- **Full scan:** every request scores the whole catalogue (fine for 42 items, not for 100k). The
-  candidate stage is where V4's retrieval will narrow this.
+- **Full scan:** every request scores the whole catalogue (fine for 42 items, not for 100k).
 - **No context** (time of day, location, weather) and no notion of "already shown but ignored".
 
 ---
@@ -563,3 +570,26 @@ works through keywords, and the response and UI say so (`mode: "keyword"`).
   at 0.62, semantic recall was 0.924.
 - Query parsing scored 16/16 on a held-out set, but the same person wrote the rules and the labels,
   so that shows the set was too easy rather than that the parser handles real phrasing.
+
+### Personalised search
+
+`GET /users/{id}/recommendations?q=...` joins the two systems without merging them. Search decides
+what may appear, including hard filters. The recommender decides the order for this user, with
+`query_match` as half the score. Diversity is off, because the person asked for something specific.
+In the UI this is the **Rank for me** action on search results.
+
+### Grounded explanations
+
+Reasons are fixed templates filled from real data. "Similar to Beginner pottery wheel class, which
+you saved" takes the title from the catalogue and the verb from the user's current replayed state,
+so an undone save is never cited and a reason cannot describe something that does not exist. Tests
+assert that every cited title is something the user engaged with.
+
+### Why there is no LLM
+
+An LLM was left out on purpose. Reranking has no real interaction data to be measured against, and
+synthetic data would reward whatever matches how it was generated. Explanations are already grounded
+and cannot be invented. An LLM would add an API key, per-call cost, latency and a failure mode for no
+demonstrated gain. The natural place for one is rewriting explanations or resolving ambiguous
+requests, validated against the same structures and falling back to today's deterministic output,
+once real usage shows a gap.

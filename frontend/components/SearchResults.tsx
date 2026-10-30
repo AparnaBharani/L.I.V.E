@@ -1,10 +1,18 @@
 "use client";
 
+import { useState } from "react";
+import { api } from "@/lib/api";
 import { type ExperienceEvent, EMPTY_STATE, eventProperties, type ExperienceState } from "@/lib/events";
 import { formatCost, formatDuration } from "@/lib/format";
-import type { NewInteraction, ParsedQuery, SearchHit, SearchResponse } from "@/lib/types";
+import type {
+  NewInteraction,
+  ParsedQuery,
+  RecommendationsResponse,
+  SearchHit,
+  SearchResponse,
+} from "@/lib/types";
 import { ExperienceCard } from "./ExperienceCard";
-import { Empty } from "./Status";
+import { Empty, ErrorMessage } from "./Status";
 
 /** Show what the query was understood to mean, so a hidden filter is never a mystery. */
 function understoodLabels(understood: ParsedQuery): string[] {
@@ -28,12 +36,29 @@ interface Props {
   result: SearchResponse;
   states: Map<number, ExperienceState>;
   record: (event: NewInteraction) => Promise<unknown>;
-  disabled: boolean;
+  userId: number | null;
   onClear: () => void;
 }
 
-export function SearchResults({ result, states, record, disabled, onClear }: Props) {
+export function SearchResults({ result, states, record, userId, onClear }: Props) {
   const labels = understoodLabels(result.understood);
+  const [personal, setPersonal] = useState<RecommendationsResponse | null>(null);
+  const [personalError, setPersonalError] = useState<string | null>(null);
+
+  async function rankForMe() {
+    if (userId === null) return;
+    setPersonalError(null);
+    try {
+      setPersonal(await api.getRecommendations(userId, 30, result.query));
+    } catch (e) {
+      setPersonalError((e as Error).message);
+    }
+  }
+
+  // Each card is the experience plus why it is here, whichever ranking is showing.
+  const cards = personal
+    ? personal.items.map((item) => ({ experience: item.experience, why: item.reasons.join(" · ") }))
+    : result.items.map((hit) => ({ experience: hit.experience, why: matchReason(hit) }));
 
   return (
     <section aria-labelledby="search-results" data-mode={result.mode}>
@@ -44,6 +69,12 @@ export function SearchResults({ result, states, record, disabled, onClear }: Pro
         <button type="button" onClick={onClear} className="text-sm text-zinc-500 underline hover:text-zinc-900">
           Clear search
         </button>
+        {userId !== null && result.total > 1 && !personal && (
+          <button type="button" onClick={rankForMe} className="text-sm text-zinc-500 underline hover:text-zinc-900">
+            Rank for me
+          </button>
+        )}
+        {personal && <span className="text-sm text-zinc-500">Ordered for you</span>}
       </div>
       {labels.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs" data-testid="understood">
@@ -58,26 +89,27 @@ export function SearchResults({ result, states, record, disabled, onClear }: Pro
       {result.mode === "keyword" && (
         <p className="mt-2 text-xs text-zinc-500">Matching by keywords only: meaning-based search is unavailable right now.</p>
       )}
+      {personalError && <div className="mt-2"><ErrorMessage message={personalError} /></div>}
       <div className="mt-4">
-        {result.items.length === 0 ? (
+        {cards.length === 0 ? (
           <Empty>Nothing matches “{result.query}”. Try fewer constraints or different words.</Empty>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {result.items.map((hit, index) => (
+            {cards.map(({ experience, why }, index) => (
               <ExperienceCard
-                key={hit.experience.id}
-                experience={hit.experience}
-                state={states.get(hit.experience.id) ?? EMPTY_STATE}
-                disabled={disabled}
+                key={experience.id}
+                experience={experience}
+                state={states.get(experience.id) ?? EMPTY_STATE}
+                disabled={userId === null}
                 onEvent={(type: ExperienceEvent) =>
                   record({
                     event_type: type,
-                    experience_id: hit.experience.id,
-                    properties: eventProperties("search", index),
+                    experience_id: experience.id,
+                    properties: eventProperties(personal ? "personalised_search" : "search", index),
                   })
                 }
               >
-                <p className="text-xs text-zinc-500">{matchReason(hit)}</p>
+                <p className="text-xs text-zinc-500">{why}</p>
               </ExperienceCard>
             ))}
           </div>

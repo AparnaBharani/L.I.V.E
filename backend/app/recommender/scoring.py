@@ -5,8 +5,10 @@ numbers are bigger. For preference features, 0.5 (NEUTRAL) means "no information
 """
 
 import math
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import datetime
+
+import numpy as np
 
 from .config import DEFAULT_CONFIG, NEUTRAL, RecommenderConfig
 from .models import ExperienceInfo, UserProfile
@@ -74,12 +76,55 @@ def novelty(exp: ExperienceInfo, profile: UserProfile) -> float:
     return 0.0 if exp.id in profile.seen else 1.0
 
 
+def taste_vector(profile: UserProfile, embeddings: Mapping[int, Sequence[float]]) -> np.ndarray | None:
+    """Average of what the user engaged with positively, weighted by how positively."""
+    liked = [(i, a) for i, a in profile.item_affinity.items() if a > 0 and i in embeddings]
+    if not liked:
+        return None
+    mean = sum(a * _unit(embeddings[i]) for i, a in liked)
+    return mean / np.linalg.norm(mean)
+
+
+def _unit(vector: Sequence[float]) -> np.ndarray:
+    array = np.asarray(vector, dtype=np.float32)
+    return array / np.linalg.norm(array)
+
+
+def semantic_match(
+    exp: ExperienceInfo,
+    taste: np.ndarray | None,
+    embeddings: Mapping[int, Sequence[float]],
+    config: RecommenderConfig,
+) -> float:
+    """How close this experience is in meaning to the user's taste."""
+    if taste is None or exp.id not in embeddings:
+        return NEUTRAL
+    low, high = config.semantic_range
+    return float(np.clip((float(_unit(embeddings[exp.id]) @ taste) - low) / (high - low), 0.0, 1.0))
+
+
+def closest_engaged(
+    exp: ExperienceInfo,
+    engaged: Sequence[int],
+    embeddings: Mapping[int, Sequence[float]],
+) -> tuple[int, float] | None:
+    """The user's saved, liked or completed experience nearest in meaning, with its similarity."""
+    options = [i for i in engaged if i != exp.id and i in embeddings]
+    if not options or exp.id not in embeddings:
+        return None
+    vector = _unit(embeddings[exp.id])
+    best = max(sorted(options), key=lambda i: float(_unit(embeddings[i]) @ vector))
+    return best, float(_unit(embeddings[best]) @ vector)
+
+
 def compute_features(
     exp: ExperienceInfo,
     profile: UserProfile,
     fans: Mapping[int, int],
     now: datetime,
     config: RecommenderConfig = DEFAULT_CONFIG,
+    taste: np.ndarray | None = None,
+    embeddings: Mapping[int, Sequence[float]] | None = None,
 ) -> dict[str, float]:
     return {
         "category_match": category_match(exp, profile),
@@ -90,6 +135,7 @@ def compute_features(
         "popularity": popularity(exp, fans),
         "freshness": freshness(exp, now, config),
         "novelty": novelty(exp, profile),
+        "semantic_match": semantic_match(exp, taste, embeddings or {}, config),
     }
 
 

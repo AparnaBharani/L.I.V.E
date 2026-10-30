@@ -23,7 +23,7 @@ from app.recommender.evaluation import (
     v2_ranker,
 )
 from app.recommender.models import Event
-from app.recommender.service import to_info
+from app.recommender.service import load_embeddings, to_info
 
 RANDOM_SEEDS = 20
 
@@ -36,6 +36,10 @@ def load(db):
     return experiences, events
 
 
+def with_semantic_weight(weight: float):
+    return replace(DEFAULT_CONFIG, feature_weights={**DEFAULT_CONFIG.feature_weights, "semantic_match": weight})
+
+
 def average(results: list[dict]) -> dict:
     return {key: sum(r[key] for r in results) / len(results) for key in results[0]}
 
@@ -44,6 +48,7 @@ def main() -> None:
     print(f"Evaluating on database '{make_url(settings.DATABASE_URL).database}' (read-only)")
     with SessionLocal() as db:
         experiences, events = load(db)
+        embeddings = load_embeddings(db)
     cases = temporal_holdout(events)
     print(f"{len(experiences)} experiences, {len(events)} events, {len(cases)} users with enough history "
           f"(2 held-out positives each)\n")
@@ -51,8 +56,10 @@ def main() -> None:
     rankers = {
         "random (avg of 20 seeds)": None,
         "popularity": popularity_ranker,
-        "V2 without diversity": v2_ranker(replace(DEFAULT_CONFIG, diversity_decay=1.0)),
-        "V2 (default config)": v2_ranker(DEFAULT_CONFIG),
+        "rules only (V2 baseline)": v2_ranker(with_semantic_weight(0.0)),
+        "current": v2_ranker(DEFAULT_CONFIG, embeddings),
+        "current, no diversity": v2_ranker(replace(DEFAULT_CONFIG, diversity_decay=1.0), embeddings),
+        "semantic_match 0.30": v2_ranker(with_semantic_weight(0.30), embeddings),
     }
     for k in (5, 10):
         print(f"K = {k}")
