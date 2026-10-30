@@ -5,16 +5,43 @@
 
 The product vision is in [docs/VISION.md](docs/VISION.md). This README is the technical guide.
 
-## Status
+## What it does
 
-| Version | Scope | State |
-|---|---|---|
-| V0 | Full-stack foundation: Next.js, FastAPI, PostgreSQL, SQLAlchemy, Alembic | done |
-| V1 | Users + interaction/event log, validated API, tests, seed data, frontend event tracking | done |
-| V2 | Rule/feature-based recommendation engine (no ML/LLM), offline evaluation, "For You" UI | done, see [V2](#v2-recommendation-engine) |
-| V3+ | NLP, hybrid retrieval, LLM reasoning, learned ranking, knowledge graph, production | planned |
+```
+Discover ──► Interact ──► Record feedback ──► Understand preferences
+   ▲                                                   │
+   └── Rank recommendations ◄── Retrieve experiences ◄─┘
+```
 
-## Architecture (V1, extended by [V2](#v2-recommendation-engine))
+- **Natural-language search:** "something relaxing under ₹400" becomes a budget filter plus a
+  meaning-based search, and the UI shows what was understood.
+- **Hybrid retrieval:** PostgreSQL full-text search and local embeddings, merged with Reciprocal
+  Rank Fusion, falling back to keywords if the model is unavailable.
+- **Personalised recommendations:** an explainable feature-based ranker built from an append-only
+  event log, with honest cold-start handling.
+- **Grounded explanations:** every reason comes from real data, for example "similar to Beginner
+  pottery wheel class, which you saved".
+- **Measured:** offline evaluation for ranking and retrieval, plus backend and browser tests in CI.
+
+Quality figures in this README come from synthetic data and developer-written labels. They compare
+methods against each other and do not show real-world quality.
+
+### Five-minute demo
+
+Run the app (see [Setup](#setup)), then:
+
+1. Pick `demo_outdoor_maya`, then `demo_creative_lena`. Recommendations follow each history.
+2. Click the example search **ceramics**: it finds pottery with no shared words.
+3. Click **something relaxing under ₹400**: see the budget understood and enforced.
+4. On the results, click **Rank for me** to reorder them for this user.
+5. Pick `demo_coldstart_ella`: popular picks, labelled as not personalised.
+6. Save and like a few things as Ella: the section becomes personalised, with reasons.
+7. Open **My history**: every action, as stored in the event log.
+
+Reset the demo with `python -m scripts.seed --reset`. Deployment is covered in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+## Architecture
 
 ```
  Browser
@@ -25,8 +52,9 @@ The product vision is in [docs/VISION.md](docs/VISION.md). This README is the te
     ▼
  FastAPI (backend/app/)
     main.py ── CORS, includes routers
-    routers/users.py · experiences.py · interactions.py · recommendations.py (V2)
-    recommender/ ── V2 engine: profile → candidates → features → score → diversify → explain
+    routers/users.py · experiences.py · interactions.py · recommendations.py · search.py
+    search/ ── query understanding, keyword and semantic retrieval, fusion
+    recommender/ ── profile → candidates → features → score → diversify → explain
     dependencies.py ── DbSession (Depends(get_db)), get_or_404, ExistingUser, pagination
     schemas.py ── Pydantic request (validate) / response (serialise) models
     │  SQLAlchemy 2.x ORM, psycopg 3
@@ -47,7 +75,8 @@ invariants again with constraints, so no write path can store invalid events.
 ```
 backend/
   app/            FastAPI application (config, database, models, enums, schemas, routers)
-  app/recommender/  V2 recommendation engine (pure pipeline + DB-loading service)
+  app/search/       query understanding and hybrid retrieval
+  app/recommender/  recommendation engine (pure pipeline + DB-loading service)
   alembic/        migrations (versions/*.py)
   scripts/seed.py      demo data for the development database
   scripts/evaluate.py  offline recommender evaluation (read-only)
@@ -90,7 +119,8 @@ uvicorn app.main:app --reload        # http://127.0.0.1:8000, docs at /docs
 | Variable | Used by | Notes |
 |---|---|---|
 | `DATABASE_URL` | app, Alembic, seed | `postgresql+psycopg://USER:PASSWORD@localhost:5432/live_db` |
-| `TEST_DATABASE_URL` | pytest only | must name a different database ending in `_test`; **dropped and recreated on every test run** |
+| `CORS_ORIGINS` | app | optional locally; comma-separated origins allowed to call the API |
+| `TEST_DATABASE_URL` | pytest and Playwright | must name a different database ending in `_test`; **dropped and recreated on every test run** |
 
 ### 3. Frontend
 
@@ -158,7 +188,8 @@ pytest tests/test_api_interactions.py -v
 | `test_e2e_server.py` | the browser-test database guard |
 | `test_api_reliability.py` | hostile input, database outage and mid-request deletion produce clean errors |
 | `test_query_understanding.py`, `test_search.py` | constraint extraction, fusion, keyword and semantic retrieval, filters, fallback (with a fake embedder) |
-| `test_recommender.py`, `test_api_recommendations.py`, `test_evaluation.py` | V2, see [Testing V2](#10-testing-v2) |
+| `test_recommender.py`, `test_api_recommendations.py`, `test_evaluation.py` | see [Testing the recommender](#10-testing-the-recommender) |
+| `test_config.py` | deployment settings and the health check |
 
 **Isolation.** `tests/conftest.py` refuses to run unless `TEST_DATABASE_URL` is set, ends in `_test`
 and differs from `DATABASE_URL`. It then sets `DATABASE_URL` to the test URL *before* importing the
@@ -215,7 +246,8 @@ and `offset` (≥ 0).
 
 | Method | Path | Body | Success | Errors |
 |---|---|---|---|---|
-| GET | `/` | – | 200 health message | |
+| GET | `/` | – | 200 welcome message | |
+| GET | `/health` | – | 200 if the database answers | 503 |
 | POST | `/users` | `{username}` (3–50 chars, `[A-Za-z0-9_]`) | 201 user | 409 taken, 422 |
 | GET | `/users` | – | 200 list (id order) | 422 |
 | GET | `/users/{user_id}` | – | 200 user | 404, 422 |
@@ -225,7 +257,7 @@ and `offset` (≥ 0).
 | POST | `/users/{user_id}/interactions` | `{event_type, experience_id?, query_text?, properties?}` | 201 event | 404 user/experience, 422 |
 | GET | `/users/{user_id}/interactions` | – | 200 list, newest first | 404, 422 |
 | GET | `/users/{user_id}/interactions/state` | – | 200 current saved/liked/disliked/completed/skipped per experience, from the whole log | 404, 422 |
-| GET | `/users/{user_id}/recommendations` | – (`limit` 1–50, default 10) | 200 ranked list + strategy + reasons (V2) | 404, 422 |
+| GET | `/users/{user_id}/recommendations` | – (`limit` 1–50, default 10) | 200 ranked list + strategy + reasons; `q` ranks search results for the user | 404, 422 |
 | GET | `/search` | – (`q`, `category`, `difficulty`, `max_cost`, `max_duration_minutes`) | 200 hits + how the query was understood | 422 |
 
 Unknown fields are rejected (`422 extra_forbidden`), so clients cannot set `id`, `user_id`,
@@ -284,16 +316,16 @@ Strict Mode's double effect), card/detail buttons → `save/unsave/like/unlike/d
 search form → `search`. The `/history` page reads `GET /users/{id}/interactions`.
 
 **Demo mode.** There is no authentication: the header dropdown picks which user you act as, and
-any client can post events for any user. That is deliberate for V1 and replaced by real auth in V8.
+any client can post events for any user. That is deliberate for a demo; real authentication must come first for real users.
 
 ---
 
-## V2: Recommendation engine
+## Recommendation engine
 
 ### The problem
 
 `GET /users/{user_id}/recommendations` answers *"given what this user has done, which experiences
-are most relevant now?"* It uses only V1's structured data (experience attributes plus the
+are most relevant now?"* It uses only structured data (experience attributes plus the
 interaction log). It uses no ML, embeddings, LLMs or external services, and every score can be
 explained.
 
@@ -318,7 +350,7 @@ explained.
 
 Only `service.py` touches the database. Every other stage is a pure function of plain dataclasses,
 which is why they can be unit-tested with a fixed clock and why the offline evaluation runs the
-*same* code as the API. Retrieval (candidates) is separate from ranking (scoring), so V4 can add
+*same* code as the API. Retrieval (candidates) is separate from ranking (scoring), so new sources can add
 keyword/vector candidate sources without touching scoring.
 
 ### 1. User profile (`profile.py`)
@@ -433,7 +465,7 @@ Real response for the seeded user `demo_outdoor_maya` (`?limit=1`, experience fi
 completed. For each user with at least 4 positives, the **2 most recent positive experiences are
 held out**. The cutoff is the first event of any kind on a held-out item. The profile **and**
 popularity are rebuilt from events before the cutoff only, so no future data leaks in. Then we ask:
-*would V2's top K, generated at the cutoff, have contained what the user went on to engage with?*
+*would the top K, generated at the cutoff, have contained what the user went on to engage with?*
 
 - **Precision@K**: share of the K recommendations that were held-out positives.
 - **Recall@K**: share of the held-out positives found in the top K.
@@ -446,7 +478,7 @@ Results on the seeded data (42 experiences, 343 events, 11 evaluable users):
 |---|---|---|---|---|---|
 | random (mean of 20 seeds) | 0.056 | 0.141 | 0.106 | 0.761 | 3.74 |
 | popularity | 0.036 | 0.091 | 0.046 | 0.262 | 3.09 |
-| rules only (V2 baseline) | 0.164 | 0.409 | 0.378 | 0.524 | 3.82 |
+| rules only (baseline) | 0.164 | 0.409 | 0.378 | 0.524 | 3.82 |
 | **current** (with `semantic_match`) | **0.200** | **0.500** | **0.409** | 0.595 | **3.27** |
 | current without diversity | 0.273 | 0.682 | 0.524 | 0.833 | 1.64 |
 
@@ -454,7 +486,7 @@ Results on the seeded data (42 experiences, 343 events, 11 evaluable users):
 |---|---|---|---|---|---|
 | random | 0.052 | 0.259 | 0.152 | 0.958 | 5.20 |
 | popularity | 0.018 | 0.091 | 0.046 | 0.452 | 5.00 |
-| rules only (V2 baseline) | 0.109 | 0.545 | 0.437 | 0.762 | 5.64 |
+| rules only (baseline) | 0.109 | 0.545 | 0.437 | 0.762 | 5.64 |
 | **current** | **0.118** | **0.591** | **0.444** | 0.786 | **5.73** |
 | current without diversity | 0.145 | 0.727 | 0.544 | 0.929 | 3.55 |
 
@@ -469,11 +501,11 @@ What the numbers say:
 - **Diversity costs accuracy.** Turning it off raises Recall@5 from 0.50 to 0.68 but collapses lists
   to about 1.6 categories. The default is a deliberate middle point, and the sweep that chose it
   ran on this same data, so these figures are optimistic.
-- `tests/test_evaluation.py` re-runs this on freshly seeded test data and fails if V2 stops beating
+- `tests/test_evaluation.py` re-runs this on freshly seeded test data and fails if the recommender stops beating
   both baselines.
 
 **Limitations:** the data is **synthetic**. The seed script generates behaviour from category
-preferences, which is exactly what V2 models, so good scores are partly built in. There are only
+preferences, which is exactly what the recommender models, so good scores are partly built in. There are only
 11 evaluable users and 2 held-out items each, so one user changes recall by about 0.05. Offline
 hit-rate is not user value. Real validation needs real users, online signals (completion after
 recommendation) and more held-out data.
@@ -481,8 +513,8 @@ recommendation) and more held-out data.
 ### 9. Frontend flow
 
 The catalogue page (`/`) shows **For You** above the full catalogue (`components/ForYou.tsx`):
-6 recommendations with rank, score and reasons. Interacting with a recommended card posts a normal
-V1 event with `properties = {source: "recommendations", position, strategy}`. That changes the
+6 recommendations with rank, score and reasons. Interacting with a recommended card posts a
+normal event with `properties = {source: "recommendations", position, strategy}`. That changes the
 user's newest event id, which triggers a re-fetch, so the loop is visible immediately:
 
 ```
@@ -491,15 +523,15 @@ recommendation ─► user action ─► POST /users/{id}/interactions ─► ev
       └──── GET /users/{id}/recommendations ◄── profile rebuilt ◄─────┘
 ```
 
-### 10. Testing V2
+### 10. Testing the recommender
 
 | File | Tests |
 |---|---|
 | `test_recommender.py` | pure pipeline with a fixed clock: history size, every feedback type, unsave/unlike, recency, category/difficulty/cost/duration preferences, cold start, diversity, candidate exclusion, determinism, pagination, features in [0, 1], reasons, metric maths, hold-out without leakage |
 | `test_api_recommendations.py` | API on the test database: outdoor/creative/wellness users get their category first, different users get different lists, the event → recommendation loop, cold start, exclusions, skipped categories sink, response schema, determinism, pagination, 404, 422, read-only |
-| `test_evaluation.py` | V2 beats random and popularity on seeded test data; top 5 keeps ≥ 3 categories |
+| `test_evaluation.py` | the recommender beats random and popularity on seeded test data; top 5 keeps ≥ 3 categories |
 
-### 11. Limitations of V2 (by design, for later versions)
+### 11. Limitations
 
 - **Hand-set weights**, tuned lightly on synthetic data. Learning them needs real interaction data.
 - **No collaborative signal** beyond global popularity ("people like you also did…").

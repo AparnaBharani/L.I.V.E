@@ -3,8 +3,11 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 
+from app.config import settings
+from app.dependencies import DbSession
 from app.routers import experiences, interactions, recommendations, search, users
 
 logger = logging.getLogger(__name__)
@@ -13,8 +16,7 @@ app = FastAPI(title="L.I.V.E API")
 
 app.add_middleware(
     CORSMiddleware,
-    # The Next.js dev server, reachable under either local hostname.
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -41,3 +43,10 @@ def database_unavailable(request: Request, exc: OperationalError) -> JSONRespons
 @app.get("/")
 def home():
     return {"message": "L.I.V.E backend is running"}
+
+
+@app.get("/health")
+def health(db: DbSession):
+    # For the host's health checks. A database failure becomes the 503 above.
+    db.execute(text("SELECT 1"))
+    return {"status": "ok"}
