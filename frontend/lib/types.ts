@@ -41,6 +41,16 @@ export interface Interaction {
   occurred_at: string;
 }
 
+// GET /users/{id}/interactions/state: computed by the backend from the whole event log.
+export interface ExperienceStateRow {
+  experience_id: number;
+  saved: boolean;
+  liked: boolean;
+  disliked: boolean;
+  completed: boolean;
+  skipped: boolean;
+}
+
 // V2: GET /users/{id}/recommendations
 export interface RecommendationItem {
   rank: number;

@@ -43,12 +43,14 @@ export function ExperienceActions({ state, onEvent, disabled }: Omit<Props, "exp
     }
   }
 
-  const buttons: { type: ExperienceEvent; label: string; active?: boolean }[] = [
+  // Done, Disliked and Skipped have no undo button, so they lock once applied. Save and
+  // like stay clickable because clicking them again is the undo.
+  const buttons: { type: ExperienceEvent; label: string; active?: boolean; locked?: boolean }[] = [
     state.saved ? { type: "unsave", label: "Saved ✓", active: true } : { type: "save", label: "Save" },
     state.liked ? { type: "unlike", label: "Liked ✓", active: true } : { type: "like", label: "Like" },
-    { type: "dislike", label: state.disliked ? "Disliked" : "Dislike", active: state.disliked },
-    { type: "complete", label: state.completed ? "Done ✓" : "Mark done", active: state.completed },
-    { type: "skip", label: "Not for me" },
+    { type: "dislike", label: state.disliked ? "Disliked" : "Dislike", active: state.disliked, locked: state.disliked },
+    { type: "complete", label: state.completed ? "Done ✓" : "Mark done", active: state.completed, locked: state.completed },
+    { type: "skip", label: state.skipped ? "Skipped" : "Not for me", active: state.skipped, locked: state.skipped },
   ];
 
   return (
@@ -59,7 +61,7 @@ export function ExperienceActions({ state, onEvent, disabled }: Omit<Props, "exp
             key={b.type}
             type="button"
             data-event={b.type}
-            disabled={disabled || pending !== null}
+            disabled={disabled || pending !== null || b.locked}
             onClick={() => send(b.type)}
             className={`rounded border px-2 py-1 text-xs disabled:opacity-50 ${
               b.active ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 hover:border-zinc-900"

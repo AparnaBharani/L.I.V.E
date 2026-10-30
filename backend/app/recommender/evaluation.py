@@ -130,16 +130,17 @@ def evaluate(
     config: RecommenderConfig = DEFAULT_CONFIG,
 ) -> dict[str, float]:
     cases = temporal_holdout(events, n_holdout=n_holdout, config=config)
+    in_time_order = sorted(events, key=lambda ue: ue.event.occurred_at)
     category_of = {e.id: e.category for e in experiences}
     totals = {"precision": 0.0, "recall": 0.0, "ndcg": 0.0, "categories": 0.0}
     shown: set[int] = set()
     for case in cases:
         # Popularity as it was at the cutoff: no one's future events.
         fans = count_fans(
-            (ue.user_id, ue.event.experience_id) for ue in events
-            if ue.event.occurred_at < case.cutoff
-            and ue.event.event_type in config.popularity_events
-            and ue.event.experience_id is not None
+            ((ue.user_id, ue.event.experience_id, ue.event.event_type, ue.event.occurred_at)
+             for ue in in_time_order
+             if ue.event.occurred_at < case.cutoff and ue.event.experience_id is not None),
+            config,
         )
         recommended = ranker(experiences, case, fans, k)
         totals["precision"] += precision_at_k(recommended, case.held_out, k)

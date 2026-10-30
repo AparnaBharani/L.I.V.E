@@ -154,6 +154,7 @@ pytest tests/test_api_interactions.py -v
 | `test_database.py` | constraints, FKs, cascade, JSONB, schema built by Alembic, isolation |
 | `test_seed.py` | seed safety, idempotence, determinism, profile coherence |
 | `test_e2e_server.py` | the browser-test database guard |
+| `test_api_reliability.py` | hostile input, database outage and mid-request deletion produce clean errors |
 | `test_recommender.py`, `test_api_recommendations.py`, `test_evaluation.py` | V2, see [Testing V2](#10-testing-v2) |
 
 **Isolation.** `tests/conftest.py` refuses to run unless `TEST_DATABASE_URL` is set, ends in `_test`
@@ -220,6 +221,7 @@ and `offset` (≥ 0).
 | GET | `/experiences/{experience_id}` | – | 200 experience | 404, 422 |
 | POST | `/users/{user_id}/interactions` | `{event_type, experience_id?, query_text?, properties?}` | 201 event | 404 user/experience, 422 |
 | GET | `/users/{user_id}/interactions` | – | 200 list, newest first | 404, 422 |
+| GET | `/users/{user_id}/interactions/state` | – | 200 current saved/liked/disliked/completed/skipped per experience, from the whole log | 404, 422 |
 | GET | `/users/{user_id}/recommendations` | – (`limit` 1–50, default 10) | 200 ranked list + strategy + reasons (V2) | 404, 422 |
 
 Unknown fields are rejected (`422 extra_forbidden`), so clients cannot set `id`, `user_id`,
@@ -230,7 +232,11 @@ validation, so a bad body sent to an unknown user returns 404.
 ## Interaction / event model
 
 `interactions` is an **append-only log**: one row per action, never updated. Current state, such as
-"is this saved?", is derived by replaying events, where the latest `save`/`unsave` wins.
+"is this saved?", is derived by replaying events. `app/recommender/state.py` is the one place that
+defines how: each event type counts once per experience at its latest time, `unsave`/`unlike` remove
+what they reverse, `like` and `dislike` replace each other, and a positive action clears a `skip`.
+The log keeps everything that happened; this is only how it is interpreted, so repeated clicks
+cannot inflate a preference and old data is corrected without rewriting it.
 
 | Column | Type | Notes |
 |---|---|---|
@@ -313,15 +319,16 @@ keyword/vector candidate sources without touching scoring.
 
 ### 1. User profile (`profile.py`)
 
-Each experience-linked event contributes a **signal** = `event_weight × recency_weight`.
+Each event type still in effect for an experience (see `state.py`) contributes a **signal** =
+`event_weight × recency_weight`, using its latest time.
 
 | Event | Weight | | Event | Weight |
 |---|---|---|---|---|
-| view | +1 | | unsave | −4 (cancels a save) |
-| click | +2 | | unlike | −5 (cancels a like) |
+| view | +1 | | unsave | none: removes the save |
+| click | +2 | | unlike | none: removes the like |
 | save | +4 | | skip | −3 |
 | like | +5 | | dislike | −5 |
-| complete | +6 | | search | 0 (no experience; text is used from V3 on) |
+| complete | +6 | | search | none: not about one experience |
 
 **Recency:** `recency_weight = 0.5 ** (age_days / 30)`. An event loses half its influence every
 30 days (1.0 today, 0.5 after a month, 0.25 after two). Future timestamps count as "now".
@@ -357,7 +364,7 @@ preference features, 0.5 means "no information".
 | `difficulty_match` | 0.10 | 1 − \|level − preferred level\| / 2 on beginner=0, intermediate=1, advanced=2 |
 | `duration_match` | 0.10 | min(d, preferred) / max(d, preferred): 120 vs 60 min → 0.5 |
 | `cost_match` | 0.10 | 1 if cost ≤ preferred, else (preferred + 100) / (cost + 100) |
-| `popularity` | 0.05 | log(1 + fans) / log(1 + max fans); fans = distinct users who saved/liked/completed |
+| `popularity` | 0.05 | log(1 + fans) / log(1 + max fans); fans = users who currently have a save, like or completion in effect |
 | `freshness` | 0.05 | 0.5 ** (days since created / 60) |
 | `novelty` | 0.05 | 1 if the user never interacted with it, else 0 |
 
@@ -428,21 +435,23 @@ Results on the seeded data (42 experiences, 343 events, 11 evaluable users):
 | K=5 | Precision | Recall | NDCG | Coverage | Categories |
 |---|---|---|---|---|---|
 | random (mean of 20 seeds) | 0.046 | 0.116 | 0.084 | 0.749 | 3.67 |
-| popularity | 0.018 | 0.045 | 0.022 | 0.310 | 3.27 |
-| V2 without diversity | 0.273 | 0.682 | 0.534 | 0.810 | 1.73 |
-| **V2 (default)** | **0.182** | **0.455** | **0.392** | 0.571 | **3.64** |
+| popularity | 0.036 | 0.091 | 0.046 | 0.262 | 3.09 |
+| V2 without diversity | 0.273 | 0.682 | 0.531 | 0.786 | 1.73 |
+| **V2 (default)** | **0.164** | **0.409** | **0.378** | 0.524 | **3.82** |
 
 | K=10 | Precision | Recall | NDCG | Coverage | Categories |
 |---|---|---|---|---|---|
 | random | 0.050 | 0.250 | 0.136 | 0.964 | 5.25 |
-| popularity | 0.018 | 0.091 | 0.041 | 0.452 | 5.18 |
-| V2 without diversity | 0.145 | 0.727 | 0.554 | 0.905 | 3.64 |
-| **V2 (default)** | **0.118** | **0.591** | **0.447** | 0.714 | **5.55** |
+| popularity | 0.018 | 0.091 | 0.046 | 0.452 | 5.00 |
+| V2 without diversity | 0.145 | 0.727 | 0.551 | 0.881 | 3.91 |
+| **V2 (default)** | **0.109** | **0.545** | **0.437** | 0.762 | **5.64** |
 
 What the numbers say:
-- V2 finds held-out positives about **4× more often than random at K=5**, and popularity is *worse*
+- V2 finds held-out positives about **3.5× more often than random at K=5**, and popularity is *worse*
   than random. Generic popular items aren't what a specific person goes on to do.
-- **Diversity costs accuracy.** Turning it off raises Recall@5 from 0.46 to 0.68 but collapses the
+- Making reversals and repeats correct moved V2's Recall@5 from 0.455 to 0.409. That is one held-out
+  item out of 22, which is noise at this sample size, so the weights were deliberately not re-tuned.
+- **Diversity costs accuracy.** Turning it off raises Recall@5 from 0.41 to 0.68 but collapses the
   list to ~1.7 categories. The default (decay 0.9) is a deliberate middle point. The sweep that
   chose it (category weight 0.30–0.50 × decay 0.85–1.0) ran **on this same data**, so these figures
   are optimistic.
@@ -482,7 +491,7 @@ recommendation ─► user action ─► POST /users/{id}/interactions ─► ev
 - **Category is the only notion of similarity.** "Pottery" and "ceramics" are unrelated unless they
   share a category, and search text is ignored. That's V3 (NLP/embeddings) and V4 (hybrid retrieval).
 - **No collaborative signal** beyond global popularity ("people like you also did…").
-- **Popularity ignores later unsave/unlike** and counts all time equally.
+- **Popularity counts all time equally**, with no decay for old fans.
 - **Full scan:** every request scores the whole catalogue (fine for 42 items, not for 100k). The
   candidate stage is where V4's retrieval will narrow this.
 - **No context** (time of day, location, weather) and no notion of "already shown but ignored".

@@ -4,7 +4,7 @@ recommend()          the pure pipeline: profile → candidates → features → 
 recommend_for_user() loads the inputs from PostgreSQL and calls recommend()
 """
 
-from collections import defaultdict
+from collections import Counter
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import datetime
 
@@ -21,14 +21,19 @@ from .models import Event, ExperienceInfo, Recommendation, RecommendationResult
 from .profile import build_profile
 from .ranking import Scored, diversify, rank
 from .scoring import compute_features, weighted_score
+from .state import ExperienceState, replay
 
 
-def count_fans(rows: Iterable[tuple[int, int]]) -> dict[int, int]:
-    """(user_id, experience_id) rows of positive events → distinct users per experience."""
-    users: dict[int, set[int]] = defaultdict(set)
-    for user_id, experience_id in rows:
-        users[experience_id].add(user_id)
-    return {experience_id: len(u) for experience_id, u in users.items()}
+def count_fans(
+    rows: Iterable[tuple[int, int, EventType, datetime]],
+    config: RecommenderConfig = DEFAULT_CONFIG,
+) -> dict[int, int]:
+    """(user_id, experience_id, event_type, occurred_at) in time order → current fans per experience."""
+    states = replay(((user_id, experience_id), event_type, at) for user_id, experience_id, event_type, at in rows)
+    return dict(Counter(
+        experience_id for (_, experience_id), state in states.items()
+        if state.active.keys() & config.popularity_events
+    ))
 
 
 def recommend(
@@ -82,21 +87,29 @@ def to_info(exp: Experience) -> ExperienceInfo:
 
 
 def load_fans(db: Session, config: RecommenderConfig = DEFAULT_CONFIG) -> dict[int, int]:
-    # Simplification: a later unsave/unlike does not remove someone as a fan.
     rows = db.execute(
-        select(Interaction.user_id, Interaction.experience_id)
-        .where(Interaction.event_type.in_(config.popularity_events), Interaction.experience_id.is_not(None))
-        .distinct()
+        select(Interaction.user_id, Interaction.experience_id, Interaction.event_type, Interaction.occurred_at)
+        .where(Interaction.experience_id.is_not(None))
+        .order_by(Interaction.occurred_at, Interaction.id)
     ).all()
-    return count_fans((r.user_id, r.experience_id) for r in rows)
+    return count_fans(((r.user_id, r.experience_id, EventType(r.event_type), r.occurred_at) for r in rows), config)
 
 
 def load_user_events(db: Session, user_id: int) -> list[Event]:
     rows = db.execute(
         select(Interaction.experience_id, Interaction.event_type, Interaction.occurred_at)
         .where(Interaction.user_id == user_id)
+        .order_by(Interaction.occurred_at, Interaction.id)
     ).all()
     return [Event(r.experience_id, EventType(r.event_type), r.occurred_at) for r in rows]
+
+
+def load_experience_states(db: Session, user_id: int) -> dict[int, ExperienceState]:
+    """The user's current state per experience, from their whole history."""
+    return replay(
+        (e.experience_id, e.event_type, e.occurred_at)
+        for e in load_user_events(db, user_id) if e.experience_id is not None
+    )
 
 
 def recommend_for_user(
