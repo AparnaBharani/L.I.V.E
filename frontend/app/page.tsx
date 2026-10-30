@@ -12,6 +12,13 @@ import { api } from "@/lib/api";
 import { EMPTY_STATE, eventProperties, type ExperienceEvent } from "@/lib/events";
 import type { SearchResponse } from "@/lib/types";
 
+const EXAMPLE_SEARCHES = [
+  "something relaxing under ₹400",
+  "ceramics",
+  "learn something new in two hours",
+  "free things to do with friends",
+];
+
 export default function CataloguePage() {
   const { user } = useDemoUser();
   const { experiences, error, loading } = useExperiences();
@@ -21,10 +28,10 @@ export default function CataloguePage() {
   const [result, setResult] = useState<SearchResponse | null>(null);
   const [searchError, setSearchError] = useState<string | null>(null);
 
-  async function submitSearch(event: React.FormEvent) {
-    event.preventDefault();
-    const text = query.trim();
+  async function runSearch(rawText: string) {
+    const text = rawText.trim();
     if (!text) return;
+    setQuery(text);
     setSearching(true);
     setSearchError(null);
     try {
@@ -50,7 +57,23 @@ export default function CataloguePage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6">
-      <form onSubmit={submitSearch} className="flex flex-col gap-2 sm:flex-row">
+      {!result && (
+        <div className="mb-5">
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Find something worth doing</h1>
+          <p className="mt-1 max-w-2xl text-sm text-zinc-600">
+            L.I.V.E recommends real things to learn, make and try, and learns from what you actually do.
+            Describe what you are in the mood for, in your own words.
+          </p>
+        </div>
+      )}
+
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          runSearch(query);
+        }}
+        className="flex flex-col gap-2 sm:flex-row"
+      >
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
@@ -67,6 +90,22 @@ export default function CataloguePage() {
           {searching ? "Searching…" : "Search"}
         </button>
       </form>
+
+      {!result && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs" data-testid="examples">
+          <span className="text-zinc-500">Try:</span>
+          {EXAMPLE_SEARCHES.map((example) => (
+            <button
+              key={example}
+              type="button"
+              onClick={() => runSearch(example)}
+              className="rounded-full border border-zinc-300 bg-white px-2.5 py-1 text-zinc-700 hover:border-zinc-900"
+            >
+              {example}
+            </button>
+          ))}
+        </div>
+      )}
 
       {activity.error && <div className="mt-4"><ErrorMessage message={`Could not load your activity: ${activity.error}`} /></div>}
       {searchError && <div className="mt-4"><ErrorMessage message={searchError} /></div>}
@@ -93,10 +132,9 @@ export default function CataloguePage() {
             />
           )}
 
-          <h1 className="mt-10 text-2xl font-bold">All experiences</h1>
-          <p className="mt-1 text-sm text-zinc-600">Things to learn, build, explore and try. Every action is logged as an event.</p>
+          <h2 className="mt-10 text-lg font-semibold">All experiences</h2>
 
-          <section className="mt-6">
+          <section className="mt-3">
             {loading && <Loading what="experiences" />}
             {error && <ErrorMessage message={error} />}
             {experiences && experiences.length === 0 && (

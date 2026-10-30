@@ -28,6 +28,13 @@ test("empty catalogue: explains how to add data", async ({ page }) => {
   await expect(page.getByText("No experiences yet")).toBeVisible();
 });
 
+test("an unknown page offers a way back", async ({ page }) => {
+  await page.goto("/no-such-page");
+  await expect(page.getByText("Page not found")).toBeVisible();
+  await page.getByRole("link", { name: "Back to experiences" }).click();
+  await expect(page.getByRole("heading", { name: "All experiences" })).toBeVisible();
+});
+
 test("recommendations failing does not take down the catalogue", async ({ page }) => {
   await page.route(RECOMMENDATIONS, (route) => route.abort());
   await page.goto("/");

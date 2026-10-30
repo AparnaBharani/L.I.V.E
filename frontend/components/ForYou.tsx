@@ -53,7 +53,7 @@ export function ForYou({ userId, refreshKey, states, record }: Props) {
       <p className="text-xs text-zinc-500">
         {coldStart
           ? "No activity yet, so these are ranked by popularity and freshness, not by your taste. Interact with anything to personalise them."
-          : "Ranked by the V2 rule-based recommender from your saves, likes, completions, skips and views."}
+          : "Based on what you saved, liked, completed and skipped. Each pick says why it is here."}
       </p>
       <div className="mt-3">
         {loadError && <ErrorMessage message={loadError} />}
