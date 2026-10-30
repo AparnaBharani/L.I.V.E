@@ -62,11 +62,15 @@ def main() -> None:
     from alembic.config import Config
 
     from app.database import SessionLocal
+    from app.search.embedding import embed_missing, get_embedder
     from scripts.seed import seed
 
     command.upgrade(Config(str(BACKEND_DIR / "alembic.ini")), "head")
     with SessionLocal() as db:
         print("seeded:", seed(db, now=datetime.now(timezone.utc)))
+        embedder = get_embedder()
+        if embedder is not None:
+            print("embedded:", embed_missing(db, embedder))
 
     uvicorn.run("app.main:app", host=HOST, port=PORT)
 

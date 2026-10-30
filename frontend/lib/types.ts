@@ -51,6 +51,32 @@ export interface ExperienceStateRow {
   skipped: boolean;
 }
 
+// GET /search
+export interface ParsedQuery {
+  text: string;
+  categories: string[];
+  category: string | null;
+  difficulty: string | null;
+  max_cost: number | null;
+  max_duration_minutes: number | null;
+}
+
+export interface SearchHit {
+  score: number;
+  keyword_rank: number | null;
+  semantic_rank: number | null;
+  category_hint: boolean;
+  experience: Experience;
+}
+
+export interface SearchResponse {
+  query: string;
+  mode: "hybrid" | "keyword" | "browse";
+  understood: ParsedQuery;
+  total: number;
+  items: SearchHit[];
+}
+
 // V2: GET /users/{id}/recommendations
 export interface RecommendationItem {
   rank: number;
