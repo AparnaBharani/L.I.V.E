@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.exc import OperationalError
 
-from app.routers import experiences, interactions, recommendations, users
+from app.routers import experiences, interactions, recommendations, search, users
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ app.include_router(users.router)
 app.include_router(experiences.router)
 app.include_router(interactions.router)
 app.include_router(recommendations.router)
+app.include_router(search.router)
 
 
 @app.exception_handler(OperationalError)

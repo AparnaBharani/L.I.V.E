@@ -5,6 +5,7 @@ import type {
   Interaction,
   NewInteraction,
   RecommendationsResponse,
+  SearchResponse,
   User,
 } from "./types";
 
@@ -60,6 +61,8 @@ export const api = {
   listUsers: () => fetchAllPages<User>("/users"),
   listExperiences: () => fetchAllPages<Experience>("/experiences"),
   getExperience: (id: number) => request<Experience>(`/experiences/${id}`),
+  search: (query: string, limit = 30) =>
+    request<SearchResponse>(`/search?q=${encodeURIComponent(query)}&limit=${limit}`),
   getRecommendations: (userId: number, limit = 6) =>
     request<RecommendationsResponse>(`/users/${userId}/recommendations?limit=${limit}`),
   listInteractions: (userId: number, limit: number, offset: number) =>

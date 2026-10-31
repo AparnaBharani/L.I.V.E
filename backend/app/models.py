@@ -3,14 +3,16 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
+    Computed,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     String,
     Text,
     func,
 )
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database import Base
@@ -31,6 +33,23 @@ class Experience(Base):
     cost: Mapped[int] = mapped_column(default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+    # Search columns are deferred: most queries never read them, and vectors are large.
+    search_vector: Mapped[str] = mapped_column(
+        TSVECTOR,
+        Computed(
+            "setweight(to_tsvector('english'::regconfig, title), 'A') || "
+            "setweight(to_tsvector('english'::regconfig, category), 'B') || "
+            "setweight(to_tsvector('english'::regconfig, description), 'C')",
+            persisted=True,
+        ),
+        deferred=True,
+    )
+    embedding: Mapped[list[float] | None] = mapped_column(ARRAY(Float), deferred=True)
+    embedding_model: Mapped[str | None] = mapped_column(String(100))
+
+    __table_args__ = (
+        Index("ix_experiences_search_vector", "search_vector", postgresql_using="gin"),
     )
 
 

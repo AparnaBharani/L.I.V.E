@@ -81,6 +81,7 @@ pip install -r requirements-dev.txt  # locked app deps + test tools
 copy .env.example .env               # then edit both URLs (URL-encode special characters, "@" -> "%40")
 alembic upgrade head                 # create tables
 python -m scripts.seed               # demo users, experiences, interaction histories
+python -m scripts.embed_experiences  # vectors for semantic search (downloads ~70 MB once)
 uvicorn app.main:app --reload        # http://127.0.0.1:8000, docs at /docs
 ```
 
@@ -121,6 +122,7 @@ defaults or CHECK-constraint text, and can mistake a rename for drop + add.
 |---|---|
 | `fd7484a41540` | `experiences` table |
 | `06797c060046` | `users`, `interactions` (+ CHECKs, FKs, indexes); `experiences.created_at`; `cost` server default |
+| `b3f1a9c27d10` | generated `search_vector` with a GIN index; `embedding`, `embedding_model` |
 
 ## Seed data
 
@@ -155,6 +157,7 @@ pytest tests/test_api_interactions.py -v
 | `test_seed.py` | seed safety, idempotence, determinism, profile coherence |
 | `test_e2e_server.py` | the browser-test database guard |
 | `test_api_reliability.py` | hostile input, database outage and mid-request deletion produce clean errors |
+| `test_query_understanding.py`, `test_search.py` | constraint extraction, fusion, keyword and semantic retrieval, filters, fallback (with a fake embedder) |
 | `test_recommender.py`, `test_api_recommendations.py`, `test_evaluation.py` | V2, see [Testing V2](#10-testing-v2) |
 
 **Isolation.** `tests/conftest.py` refuses to run unless `TEST_DATABASE_URL` is set, ends in `_test`
@@ -223,6 +226,7 @@ and `offset` (≥ 0).
 | GET | `/users/{user_id}/interactions` | – | 200 list, newest first | 404, 422 |
 | GET | `/users/{user_id}/interactions/state` | – | 200 current saved/liked/disliked/completed/skipped per experience, from the whole log | 404, 422 |
 | GET | `/users/{user_id}/recommendations` | – (`limit` 1–50, default 10) | 200 ranked list + strategy + reasons (V2) | 404, 422 |
+| GET | `/search` | – (`q`, `category`, `difficulty`, `max_cost`, `max_duration_minutes`) | 200 hits + how the query was understood | 422 |
 
 Unknown fields are rejected (`422 extra_forbidden`), so clients cannot set `id`, `user_id`,
 `created_at` or `occurred_at`. Integers must be real JSON integers. Errors use FastAPI's format:
@@ -495,3 +499,67 @@ recommendation ─► user action ─► POST /users/{id}/interactions ─► ev
 - **Full scan:** every request scores the whole catalogue (fine for 42 items, not for 100k). The
   candidate stage is where V4's retrieval will narrow this.
 - **No context** (time of day, location, weather) and no notion of "already shown but ignored".
+
+---
+
+## Search
+
+`GET /search` answers *"which experiences might match this request?"*. It knows nothing about the
+user. Ranking for a person stays in `app/recommender`.
+
+```
+"something relaxing under ₹400"
+        │  app/search/query.py     parse_query(): traditional NLP
+        ▼
+text "relaxing"  +  hard filter max_cost=400  +  category hint "wellness"
+        │
+        ├── keyword_search    PostgreSQL full-text search over a weighted, generated tsvector
+        └── semantic_search   cosine similarity between query and stored embeddings
+        │
+        ▼  reciprocal_rank_fusion: score = Σ 1 / (60 + rank)
+ranked hits, each reporting keyword_rank and semantic_rank
+```
+
+**Query understanding** uses normalisation, regular expressions and small lexicons rather than a
+model, so each constraint can be traced to the phrase that set it, and text it cannot interpret
+stays in the search terms instead of becoming a wrong filter. Budget, duration and difficulty are
+hard filters. Category is only a hint, since "something relaxing" should not hide a quiet walk.
+The UI shows what was understood, so a filter is never invisible. Vague words use documented
+assumptions, for example "cheap" means up to ₹500. Known gaps: no spelling correction, no general
+negation ("not hiking"), and minimums such as "at least 2 hours" are ignored.
+
+**Embeddings.** `BAAI/bge-small-en-v1.5` via fastembed: 384 dimensions, local ONNX on CPU, about
+4 ms per query after a sub-second load, with no API key or usage cost. PyTorch and a hosted API
+were rejected for install size and for cost and privacy respectively.
+
+**Why vectors live in an array column.** pgvector is not installed on the development server, and
+scanning 42 vectors with NumPy is instant. The measured reason to adopt pgvector and an approximate
+index would be this scan becoming slow, not its popularity. `semantic_search` is the only code
+that would change.
+
+**Why Reciprocal Rank Fusion.** Keyword scores and cosine similarities have unrelated scales, so
+adding them is meaningless. RRF uses positions only and needs no tuning.
+
+**Failure behaviour.** If the model cannot load, or an experience has no vector yet, search still
+works through keywords, and the response and UI say so (`mode: "keyword"`).
+
+### Evaluation
+
+`python -m scripts.evaluate_search` scores 24 hand-labelled queries:
+
+| Retriever | Recall@5 | MRR | Answered |
+|---|---|---|---|
+| keyword | 0.514 | 0.576 | 0.625 |
+| semantic | 0.979 | 1.000 | 1.000 |
+| hybrid | 0.979 | 0.958 | 1.000 |
+
+- Semantic retrieval is the clear gain: most of the difference comes from paraphrases, where
+  keyword search cannot match.
+- **Hybrid does not beat semantic alone on this data**, and its MRR is slightly lower. It is kept
+  because keyword search handles exact names and rare terms and keeps working if the model fails,
+  not because these numbers show better quality.
+- Treat these as comparisons, not quality estimates. The developer wrote the labels, the catalogue
+  is 42 short items, and `MIN_SIMILARITY` was calibrated on these same queries. Before calibration,
+  at 0.62, semantic recall was 0.924.
+- Query parsing scored 16/16 on a held-out set, but the same person wrote the rules and the labels,
+  so that shows the set was too easy rather than that the parser handles real phrasing.

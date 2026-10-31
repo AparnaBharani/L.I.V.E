@@ -128,6 +128,37 @@ class InteractionResponse(ResponseSchema):
     occurred_at: datetime
 
 
+# ---------- Search ----------
+
+class ParsedQueryResponse(BaseModel):
+    """How the query was understood, so the UI can show it and people can correct it."""
+
+    text: str = Field(description="What was left to search for after removing constraints and filler.")
+    categories: list[str] = Field(description="Soft hints read from the query.")
+    category: str | None = Field(description="Hard filter, only ever set explicitly.")
+    difficulty: str | None
+    max_cost: int | None
+    max_duration_minutes: int | None
+
+
+class SearchHitResponse(BaseModel):
+    score: float = Field(description="Reciprocal Rank Fusion score. Comparable only within one result list.")
+    keyword_rank: int | None = Field(description="Rank in full-text search; null if it did not match.")
+    semantic_rank: int | None = Field(description="Rank by meaning; null if it was not close enough.")
+    category_hint: bool
+    experience: ExperienceResponse
+
+
+class SearchResponse(BaseModel):
+    query: str
+    mode: Literal["hybrid", "keyword", "browse"] = Field(
+        description="keyword = the embedding model is unavailable; browse = there was no text to match."
+    )
+    understood: ParsedQueryResponse
+    total: int
+    items: list[SearchHitResponse]
+
+
 class ExperienceStateResponse(BaseModel):
     """The current meaning of the log for one experience (see recommender/state.py)."""
 

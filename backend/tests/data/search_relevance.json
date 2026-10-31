@@ -1,0 +1,34 @@
+{
+  "_comment": "Hand-labelled: for each query, which seeded experiences a person would consider a correct result. The 'paraphrase' group deliberately avoids the words used in the catalogue.",
+  "exact": [
+    {"q": "pottery", "relevant": ["Beginner pottery wheel class", "Build a ceramic mug set"]},
+    {"q": "yoga", "relevant": ["Morning yoga in the park"]},
+    {"q": "python", "relevant": ["Intro to Python in one afternoon"]},
+    {"q": "rafting", "relevant": ["White-water rafting day"]},
+    {"q": "dance class", "relevant": ["Salsa dancing for beginners"]},
+    {"q": "learn a language", "relevant": ["Learn 50 phrases in Japanese"]}
+  ],
+  "paraphrase": [
+    {"q": "ceramics", "relevant": ["Beginner pottery wheel class", "Build a ceramic mug set"]},
+    {"q": "calm my mind", "relevant": ["Guided meditation session", "Breathwork for stress", "Sound bath relaxation"]},
+    {"q": "flying through the air", "relevant": ["Paragliding tandem flight", "Zipline and rope course"]},
+    {"q": "helping homeless pets", "relevant": ["Volunteer at an animal shelter"]},
+    {"q": "improve my money habits", "relevant": ["Personal finance fundamentals"]},
+    {"q": "looking at the stars", "relevant": ["Night sky stargazing camp"]},
+    {"q": "making friends over food", "relevant": ["Community cooking night", "Host a neighbourhood potluck"]},
+    {"q": "get better at presenting", "relevant": ["Public speaking crash course"]},
+    {"q": "quiet time away from my phone", "relevant": ["Digital detox day", "Silent retreat weekend"]},
+    {"q": "taking pictures around town", "relevant": ["Street photography walk"]},
+    {"q": "electronics project", "relevant": ["Build a weather station with Arduino"]},
+    {"q": "trivia night", "relevant": ["Pub quiz with strangers"]},
+    {"q": "strengthen my abs", "relevant": ["Pilates core workshop"]},
+    {"q": "exciting water sports", "relevant": ["White-water rafting day", "Overnight kayaking expedition"]}
+  ],
+  "constrained": [
+    {"q": "something relaxing under ₹400", "relevant": ["Guided meditation session", "Breathwork for stress", "Morning yoga in the park"]},
+    {"q": "free coding for beginners", "relevant": ["Intro to Python in one afternoon"]},
+    {"q": "an outdoor walk for free", "relevant": ["Sunrise hill hike", "Coastal cleanup and beach walk"]},
+    {"q": "I want to paint something this weekend", "relevant": ["Watercolour landscapes workshop"]}
+  ],
+  "off_catalogue": ["quantum tax accounting", "car engine repair", "kubernetes cluster upgrade"]
+}

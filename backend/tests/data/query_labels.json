@@ -1,0 +1,37 @@
+{
+  "_comment": "Hand-labelled expectations for parse_query. 'dev' may be used to improve the parser. 'holdout' was written before the parser first ran and is only ever scored, never tuned against.",
+  "dev": [
+    {"q": "Something creative I can do this weekend", "categories": ["creative"]},
+    {"q": "An outdoor activity under ₹1000", "categories": ["outdoors"], "max_cost": 1000},
+    {"q": "I want to learn something new, but I only have two hours", "categories": ["learning"], "max_duration_minutes": 120},
+    {"q": "Something relaxing that I can do with friends", "categories": ["social", "wellness"]},
+    {"q": "free yoga for beginners", "categories": ["wellness"], "max_cost": 0, "difficulty": "beginner"},
+    {"q": "challenging hike under 5 hours", "categories": ["outdoors"], "max_duration_minutes": 300, "difficulty": "advanced"},
+    {"q": "cheap things to do tonight", "max_cost": 500},
+    {"q": "quick meditation", "categories": ["wellness"], "max_duration_minutes": 60},
+    {"q": "half day trek below rs 800", "categories": ["outdoors"], "max_cost": 800, "max_duration_minutes": 300},
+    {"q": "what can I do in my free time", "max_cost": null},
+    {"q": "at least 2 hours of painting", "categories": ["creative"]},
+    {"q": "something that isn't expensive", "max_cost": 500},
+    {"q": "budget of 1.5k for adventure", "categories": ["adventure"], "max_cost": 1500},
+    {"q": "dinner for 4 friends", "categories": ["social"]}
+  ],
+  "holdout": [
+    {"q": "I have 45 minutes and want to calm down", "categories": ["wellness"], "max_duration_minutes": 45},
+    {"q": "weekend adventure, price no more than 3000", "categories": ["adventure"], "max_cost": 3000},
+    {"q": "intro to programming", "categories": ["learning"], "difficulty": "beginner"},
+    {"q": "meet new people for less than 300 rupees", "categories": ["social"], "max_cost": 300},
+    {"q": "an easy walk in nature", "categories": ["outdoors"], "difficulty": "beginner"},
+    {"q": "a full day of hiking", "categories": ["outdoors"], "max_duration_minutes": 720},
+    {"q": "tough climbing session", "categories": ["adventure"], "difficulty": "advanced"},
+    {"q": "pottery under 1k", "categories": ["creative"], "max_cost": 1000},
+    {"q": "photography walk for 3 hours", "categories": ["creative"], "max_duration_minutes": 180},
+    {"q": "low-cost stress relief", "categories": ["wellness"], "max_cost": 500},
+    {"q": "volunteering this afternoon", "categories": ["social"], "max_duration_minutes": 300},
+    {"q": "two day camping trip", "categories": ["outdoors"], "max_duration_minutes": 2880},
+    {"q": "something fun", "categories": []},
+    {"q": "history tour for free", "categories": ["learning"], "max_cost": 0},
+    {"q": "moderate yoga class, max 600", "categories": ["wellness"], "max_cost": 600, "difficulty": "intermediate"},
+    {"q": "a couple of hours of drawing for first timers", "categories": ["creative"], "max_duration_minutes": 150, "difficulty": "beginner"}
+  ]
+}

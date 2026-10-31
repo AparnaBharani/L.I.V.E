@@ -3,10 +3,12 @@
 import re
 
 import pytest
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
 from sqlalchemy import inspect, select, text
 from sqlalchemy.exc import IntegrityError
 
-from app.database import engine
+from app.database import Base, engine
 from app.enums import EventType
 from app.models import Interaction, User
 
@@ -38,6 +40,12 @@ class TestIsolation:
         assert tables == {"alembic_version", "users", "experiences", "interactions"}
         version = db_session.execute(text("SELECT version_num FROM alembic_version")).scalar()
         assert version  # schema was built by Alembic, not create_all()
+
+
+class TestMigrationsMatchModels:
+    def test_no_drift(self, db_session):
+        context = MigrationContext.configure(db_session.connection())
+        assert compare_metadata(context, Base.metadata) == []
 
 
 class TestApiWritesReachTheDatabase:
