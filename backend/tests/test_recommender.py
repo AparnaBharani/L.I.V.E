@@ -24,6 +24,7 @@ from app.recommender.scoring import (
     difficulty_match,
     duration_match,
     popularity,
+    taste_vector,
     weighted_score,
 )
 from app.recommender.service import count_fans, recommend
@@ -398,3 +399,102 @@ class TestMetrics:
     def test_users_with_too_little_history_are_skipped(self):
         events = [UserEvent(1, ev(1, E.SAVE)), UserEvent(1, ev(2, E.SAVE))]
         assert temporal_holdout(events, n_holdout=2, min_train_positives=2) == []
+
+
+# ---------- semantic taste ----------
+
+def unit(*axes):
+    vector = [0.0] * 4
+    for axis in axes:
+        vector[axis] = 1.0
+    return vector
+
+
+# Items 1-3 and 10-12 share a meaning, while their categories say they are unrelated.
+EMBEDDINGS = {1: unit(0), 2: unit(0), 3: unit(1), 4: unit(1), 5: unit(2), 6: unit(2),
+              7: unit(3), 8: unit(3), 9: unit(3), 10: unit(0), 11: unit(0), 12: unit(1)}
+SEMANTIC = replace(DEFAULT_CONFIG, feature_weights={"semantic_match": 1.0})
+
+
+class TestSemanticTaste:
+    def test_finds_similar_meaning_across_categories(self):
+        result = recommend(CATALOGUE, [ev(1, E.COMPLETE)], {}, NOW, limit=12, config=SEMANTIC,
+                           embeddings=EMBEDDINGS)
+        scores = {r.experience.id: r.features["semantic_match"] for r in result.items}
+        assert scores[10] == 1.0     # another category, same meaning
+        assert scores[7] == 0.0      # unrelated meaning
+
+    def test_negative_history_does_not_shape_taste(self):
+        assert taste_vector(profile_of(ev(1, E.SKIP)), EMBEDDINGS) is None
+
+    def test_taste_leans_towards_stronger_engagement(self):
+        profile = profile_of(ev(1, E.COMPLETE, 0), ev(1, E.LIKE, 0), ev(5, E.VIEW, 0))
+        taste = taste_vector(profile, EMBEDDINGS)
+        assert taste[0] > taste[2] > 0
+
+    def test_is_neutral_without_embeddings(self):
+        result = recommend(CATALOGUE, [ev(1, E.SAVE)], {}, NOW, limit=1)
+        assert result.items[0].features["semantic_match"] == NEUTRAL
+
+    def test_an_experience_without_a_vector_is_neutral(self):
+        partial = {k: v for k, v in EMBEDDINGS.items() if k != 2}
+        result = recommend(CATALOGUE, [ev(1, E.SAVE)], {}, NOW, limit=12, embeddings=partial)
+        assert next(r for r in result.items if r.experience.id == 2).features["semantic_match"] == NEUTRAL
+
+    def test_a_feature_at_zero_weight_is_switched_off(self):
+        off = replace(DEFAULT_CONFIG, feature_weights={**DEFAULT_CONFIG.feature_weights, "semantic_match": 0.0})
+        result = recommend(CATALOGUE, [ev(1, E.SAVE)], {}, NOW, config=off, embeddings=EMBEDDINGS)
+        assert "semantic_match" not in result.items[0].features
+
+
+class TestGroundedExplanations:
+    def reason_for(self, events, experience_id):
+        result = recommend(CATALOGUE, events, {}, NOW, limit=12, embeddings=EMBEDDINGS)
+        return next(r for r in result.items if r.experience.id == experience_id)
+
+    def test_names_the_real_item_and_what_the_user_did(self):
+        item = self.reason_for([ev(1, E.SAVE)], 10)
+        assert item.similar_to == 1
+        assert "similar to outdoors-1, which you saved" in item.reasons
+
+    def test_the_verb_follows_current_state(self):
+        assert "similar to outdoors-1, which you completed" in self.reason_for([ev(1, E.COMPLETE)], 10).reasons
+        assert "similar to outdoors-1, which you liked" in self.reason_for([ev(1, E.LIKE)], 10).reasons
+
+    def test_an_undone_save_is_never_cited(self):
+        item = self.reason_for([ev(1, E.SAVE, 2), ev(1, E.UNSAVE, 1)], 10)
+        assert item.similar_to is None
+        assert not any("similar to" in reason for reason in item.reasons)
+
+    def test_a_view_is_not_cited_as_engagement(self):
+        assert self.reason_for([ev(1, E.VIEW)], 10).similar_to is None
+
+    def test_weak_similarity_is_not_claimed(self):
+        item = self.reason_for([ev(1, E.SAVE)], 7)
+        assert not any("similar to" in reason for reason in item.reasons)
+
+    def test_every_cited_title_is_something_the_user_engaged_with(self):
+        events = [ev(1, E.SAVE), ev(5, E.LIKE), ev(8, E.COMPLETE)]
+        engaged = {BY_ID[i].title for i in (1, 5, 8)}
+        result = recommend(CATALOGUE, events, {}, NOW, limit=12, embeddings=EMBEDDINGS)
+        cited = [r.split(",")[0].removeprefix("similar to ") for item in result.items
+                 for r in item.reasons if r.startswith("similar to")]
+        assert cited and set(cited) <= engaged
+
+
+class TestRetrievedCandidates:
+    def test_limits_candidates_and_skips_diversity(self):
+        result = recommend(CATALOGUE, [ev(1, E.VIEW)], {}, NOW, retrieved={2: 0.03, 3: 0.02, 4: 0.01})
+        assert {r.experience.id for r in result.items} == {2, 3, 4}
+        assert result.items[0].features["query_match"] == 1.0
+
+    def test_query_match_is_half_the_score(self):
+        result = recommend(CATALOGUE, [ev(1, E.VIEW)], {}, NOW, retrieved={2: 0.02})
+        features = result.items[0].features
+        others = weighted_score(features, {k: w for k, w in DEFAULT_CONFIG.feature_weights.items()})
+        assert result.items[0].relevance == pytest.approx(0.5 + others / 2, abs=1e-3)
+
+    def test_a_cold_start_user_can_still_search(self):
+        result = recommend(CATALOGUE, [], {}, NOW, retrieved={5: 0.02, 6: 0.01})
+        assert result.strategy == "cold_start"
+        assert [r.experience.id for r in result.items][0] == 5

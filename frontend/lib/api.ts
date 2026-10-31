@@ -63,8 +63,10 @@ export const api = {
   getExperience: (id: number) => request<Experience>(`/experiences/${id}`),
   search: (query: string, limit = 30) =>
     request<SearchResponse>(`/search?q=${encodeURIComponent(query)}&limit=${limit}`),
-  getRecommendations: (userId: number, limit = 6) =>
-    request<RecommendationsResponse>(`/users/${userId}/recommendations?limit=${limit}`),
+  getRecommendations: (userId: number, limit = 6, query?: string) =>
+    request<RecommendationsResponse>(
+      `/users/${userId}/recommendations?limit=${limit}${query ? `&q=${encodeURIComponent(query)}` : ""}`,
+    ),
   listInteractions: (userId: number, limit: number, offset: number) =>
     request<Interaction[]>(`/users/${userId}/interactions?limit=${limit}&offset=${offset}`),
   getInteractionState: (userId: number) =>

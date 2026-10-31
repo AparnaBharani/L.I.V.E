@@ -146,6 +146,43 @@ class TestPopularityFollowsReversals:
         assert popularity[abandoned.id] == 0.0
 
 
+class TestPersonalisedSearch:
+    def test_only_search_results_can_appear(self, client, user, make_experience):
+        match = make_experience(title="Juggling basics")
+        make_experience(title="Sunrise hike")
+
+        body = recs(client, user, q="juggling")
+
+        assert [i["experience"]["id"] for i in body["items"]] == [match.id]
+        assert "query_match" in body["items"][0]["features"]
+        assert "matches your search" in body["items"][0]["reasons"]
+
+    def test_no_search_results_means_no_recommendations(self, client, user, catalogue):
+        assert recs(client, user, q="xylophone")["items"] == []
+
+    def test_hard_filters_from_the_query_hold(self, client, user, make_experience):
+        make_experience(title="Juggling premium", cost=5000)
+        cheap = make_experience(title="Juggling basics", cost=100)
+        assert [i["experience"]["id"] for i in recs(client, user, q="juggling under 500")["items"]] == [cheap.id]
+
+    def test_the_same_search_is_ordered_differently_per_user(self, client, make_user, make_experience, add_events):
+        outdoor = make_experience(title="Juggling on the beach", description="d", category="outdoors")
+        creative = make_experience(title="Juggling on the beach too", description="d", category="creative")
+        fan_outdoor, fan_creative = make_user(), make_user()
+        fan_of(add_events, fan_outdoor, [make_experience(category="outdoors"), make_experience(category="outdoors")])
+        fan_of(add_events, fan_creative, [make_experience(category="creative"), make_experience(category="creative")])
+
+        first = recs(client, fan_outdoor, q="juggling")["items"][0]["experience"]["id"]
+        second = recs(client, fan_creative, q="juggling")["items"][0]["experience"]["id"]
+
+        assert (first, second) == (outdoor.id, creative.id)
+
+    def test_completed_experiences_stay_excluded(self, client, user, make_experience, add_events):
+        done = make_experience(title="Juggling basics")
+        add_events(user, (done, "complete", 1))
+        assert recs(client, user, q="juggling")["items"] == []
+
+
 class TestContract:
     def test_response_schema(self, client, user, catalogue, add_events):
         add_events(user, (catalogue["outdoors"][0], "like", 1))
@@ -160,7 +197,7 @@ class TestContract:
         assert 0 <= item["score"] <= item["relevance"] <= 1
         assert set(item["features"]) == {
             "category_match", "interaction_preference", "difficulty_match", "duration_match",
-            "cost_match", "popularity", "freshness", "novelty",
+            "cost_match", "popularity", "freshness", "novelty", "semantic_match",
         }
         assert set(item["experience"]) >= {"id", "title", "category", "difficulty", "duration_minutes", "cost"}
 

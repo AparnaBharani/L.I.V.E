@@ -38,6 +38,8 @@ def _feature_weights() -> dict[str, float]:
         "popularity": 0.05,
         "freshness": 0.05,
         "novelty": 0.05,
+        # Adopted because it passed a rule set before the experiment; see the README.
+        "semantic_match": 0.15,
     }
 
 
@@ -64,6 +66,13 @@ class RecommenderConfig:
     # about this much recency-weighted evidence (≈ view+click+save+like) to count fully, so
     # a single view is a nudge, not certainty.
     category_evidence_scale: float = 10.0
+
+    # Cosine similarities between experiences fall in a narrow band, so semantic_match
+    # stretches this range to [0, 1].
+    semantic_range: tuple[float, float] = (0.45, 0.85)
+
+    # When a query is given, query_match counts this much of the score, and the rest is personal.
+    query_match_share: float = 0.5
 
     # Ordinal scale for difficulty. Unknown difficulty values score as neutral.
     difficulty_levels: dict[str, int] = field(

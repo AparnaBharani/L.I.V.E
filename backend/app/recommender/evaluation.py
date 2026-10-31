@@ -94,9 +94,10 @@ def temporal_holdout(
 Ranker = Callable[[Sequence[ExperienceInfo], HoldOutCase, dict[int, int], int], list[int]]
 
 
-def v2_ranker(config: RecommenderConfig = DEFAULT_CONFIG) -> Ranker:
+def v2_ranker(config: RecommenderConfig = DEFAULT_CONFIG, embeddings=None) -> Ranker:
     def rank(experiences, case, fans, k):
-        result = recommend(experiences, case.train_events, fans, case.cutoff, limit=k, config=config)
+        result = recommend(experiences, case.train_events, fans, case.cutoff, limit=k,
+                           config=config, embeddings=embeddings)
         return [r.experience.id for r in result.items]
     return rank
 

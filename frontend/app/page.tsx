@@ -74,10 +74,11 @@ export default function CataloguePage() {
       {result ? (
         <div className="mt-6">
           <SearchResults
+            key={result.query}
             result={result}
             states={activity.states}
             record={activity.record}
-            disabled={!user}
+            userId={user?.id ?? null}
             onClear={clearSearch}
           />
         </div>

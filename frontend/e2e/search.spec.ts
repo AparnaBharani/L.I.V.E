@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { actAs, createUser, events } from "./helpers";
+import { actAs, createUser, events, seededUser } from "./helpers";
 
 const results = (page: Page) => page.locator('[aria-labelledby="search-results"] article');
 
@@ -77,4 +77,19 @@ test("without the model, search still answers by keyword and says so", async ({ 
   });
   await search(page, "pottery");
   await expect(page.getByText("Matching by keywords only")).toBeVisible();
+});
+
+test("search results can be re-ranked for the user with grounded reasons", async ({ page, request }) => {
+  const user = await seededUser(request, "demo_creative_lena");
+  await actAs(page, user.id);
+  await page.goto("/");
+  await search(page, "something to make with my hands");
+  await expect(results(page).first()).toBeVisible();
+  const total = await results(page).count();
+
+  await page.getByRole("button", { name: "Rank for me" }).click();
+
+  await expect(page.getByText("Ordered for you")).toBeVisible();
+  await expect(results(page).first()).toContainText("matches your search");
+  expect(await results(page).count()).toBeLessThanOrEqual(total);
 });

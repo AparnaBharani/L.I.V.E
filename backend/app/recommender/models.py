@@ -64,6 +64,7 @@ class Recommendation:
     relevance: float             # weighted feature score before diversity
     features: dict[str, float]
     reasons: list[str]
+    similar_to: int | None = None  # the user's own experience this one is closest to
 
 
 @dataclass(frozen=True)
