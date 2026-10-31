@@ -77,7 +77,7 @@ CREATE DATABASE live_db;
 cd backend
 python -m venv venv
 .\venv\Scripts\Activate.ps1          # macOS/Linux: source venv/bin/activate
-pip install -r requirements-dev.txt  # app deps + pytest + httpx2
+pip install -r requirements-dev.txt  # locked app deps + test tools
 copy .env.example .env               # then edit both URLs (URL-encode special characters, "@" -> "%40")
 alembic upgrade head                 # create tables
 python -m scripts.seed               # demo users, experiences, interaction histories
@@ -153,6 +153,7 @@ pytest tests/test_api_interactions.py -v
 | `test_api_users.py`, `test_api_experiences.py`, `test_api_interactions.py` | the HTTP API through FastAPI's `TestClient` |
 | `test_database.py` | constraints, FKs, cascade, JSONB, schema built by Alembic, isolation |
 | `test_seed.py` | seed safety, idempotence, determinism, profile coherence |
+| `test_e2e_server.py` | the browser-test database guard |
 | `test_recommender.py`, `test_api_recommendations.py`, `test_evaluation.py` | V2, see [Testing V2](#10-testing-v2) |
 
 **Isolation.** `tests/conftest.py` refuses to run unless `TEST_DATABASE_URL` is set, ends in `_test`
@@ -163,6 +164,45 @@ that is rolled back (`join_transaction_mode="create_savepoint"` turns the routes
 `RELEASE SAVEPOINT`), and `get_db` is overridden to hand the routes that same session.
 
 Frontend checks: `npm run lint`, `npx tsc --noEmit`, `npm run build`.
+
+### Browser tests (Playwright)
+
+```powershell
+cd frontend
+npx playwright install chromium   # first time only
+npm run test:e2e
+```
+
+**Stop your dev servers first.** Playwright starts its own servers on ports 3000 and 8000 and
+deliberately refuses to reuse a running one, because a dev server is connected to `live_db`.
+
+`backend/scripts/e2e_server.py` derives a third database, `live_db_e2e`, from `TEST_DATABASE_URL`,
+then drops, migrates and seeds it on every run. It refuses any name not ending in `_e2e`. Each
+test that writes data creates its own user, and failures are simulated by intercepting network
+requests. Tests live in `frontend/e2e/`.
+
+| Database | Used by | Lifetime |
+|---|---|---|
+| `live_db` | the app in development | permanent; never touched by tests |
+| `live_db_test` | `pytest` | recreated each run |
+| `live_db_e2e` | Playwright | recreated each run |
+
+### Continuous integration
+
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`: backend tests and
+migration checks, frontend lint, type-check and build, and the browser suite, each against a
+temporary PostgreSQL 18 container using throwaway credentials.
+
+### Updating Python dependencies
+
+`requirements.in` and `requirements-dev.in` list what the project needs directly. The `.txt` files
+are generated locks with every exact version, so do not edit them by hand.
+
+```powershell
+pip-compile requirements.in -o requirements.txt              # after editing a .in file
+pip-compile requirements-dev.in -o requirements-dev.txt
+pip-compile --upgrade requirements.in -o requirements.txt    # deliberately take newer versions
+```
 
 ## API
 

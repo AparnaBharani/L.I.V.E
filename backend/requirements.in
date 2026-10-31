@@ -1,0 +1,10 @@
+# Direct runtime dependencies. Edit this file, then regenerate the lock:
+#   pip-compile requirements.in -o requirements.txt
+#   pip-compile requirements-dev.in -o requirements-dev.txt
+fastapi
+uvicorn
+sqlalchemy>=2.0
+psycopg[binary]
+alembic
+pydantic-settings
+python-dotenv

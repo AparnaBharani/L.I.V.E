@@ -1,0 +1,8 @@
+# Everything in requirements.in, plus tools needed only for development and testing.
+-r requirements.in
+pytest>=9.1,<10
+# HTTP client used by FastAPI's TestClient to call the app in tests.
+# (Starlette's TestClient prefers httpx2; plain httpx is deprecated there.)
+httpx2>=2.0
+# Generates requirements.txt and requirements-dev.txt from the .in files.
+pip-tools
