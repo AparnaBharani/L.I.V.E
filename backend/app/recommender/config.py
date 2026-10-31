@@ -10,19 +10,17 @@ from app.enums import EventType as E
 
 
 def _event_weights() -> dict[E, float]:
-    # How much one event says about the user's interest in that experience.
-    # Reversals cancel the original event exactly (save +4, unsave -4).
+    # How much an event says about the user's interest in that experience. Each type counts
+    # once per experience. unsave/unlike have no weight: they remove what they reverse
+    # (see state.py). search has none because it is not about one experience.
     return {
         E.VIEW: 1.0,
         E.CLICK: 2.0,
         E.SAVE: 4.0,
-        E.UNSAVE: -4.0,
         E.LIKE: 5.0,
-        E.UNLIKE: -5.0,
         E.COMPLETE: 6.0,
         E.SKIP: -3.0,
         E.DISLIKE: -5.0,
-        E.SEARCH: 0.0,  # no experience attached; query text is used from V3 on
     }
 
 
@@ -59,7 +57,7 @@ class RecommenderConfig:
     # Freshness: an experience's "newness" halves every this many days after creation.
     freshness_half_life_days: float = 60.0
 
-    # Events that count a user as a "fan" of an experience for popularity.
+    # A user is a "fan" of an experience while any of these is still in effect (see state.py).
     popularity_events: frozenset[E] = frozenset({E.SAVE, E.LIKE, E.COMPLETE})
 
     # Category affinity = category sum / max(strongest category sum, this). A category needs

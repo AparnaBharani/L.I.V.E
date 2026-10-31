@@ -110,12 +110,43 @@ class TestFeedback:
         w = DEFAULT_CONFIG.event_weights
         assert w[E.COMPLETE] > w[E.LIKE] > w[E.SAVE] > w[E.CLICK] > w[E.VIEW] > 0
         assert w[E.DISLIKE] < w[E.SKIP] < 0
-        assert w[E.SAVE] == -w[E.UNSAVE] and w[E.LIKE] == -w[E.UNLIKE]
 
-    def test_unsave_cancels_save(self):
-        profile = profile_of(ev(1, E.SAVE, 2), ev(1, E.UNSAVE, 1))
+    def test_unsave_is_an_undo_not_negative_feedback(self):
+        # An old save has decayed, so subtracting a fresh -4 would leave a negative signal.
+        profile = profile_of(ev(1, E.SAVE, 30), ev(1, E.UNSAVE, 0))
         assert 1 not in profile.saved
-        assert profile.item_affinity[1] < profile_of(ev(1, E.SAVE, 2)).item_affinity[1]
+        assert profile.item_affinity[1] == 0
+
+    def test_unlike_is_an_undo_not_negative_feedback(self):
+        assert profile_of(ev(1, E.LIKE, 30), ev(1, E.UNLIKE, 0)).item_affinity[1] == 0
+
+    @pytest.mark.parametrize("event", [E.COMPLETE, E.SKIP, E.DISLIKE, E.SAVE, E.LIKE, E.VIEW, E.CLICK])
+    def test_repeating_an_event_adds_no_signal(self, event):
+        once = profile_of(ev(1, event, 0))
+        five_times = profile_of(*[ev(1, event, 0) for _ in range(5)])
+        assert five_times.item_affinity == once.item_affinity
+        assert five_times.category_affinity == once.category_affinity
+
+    def test_repeated_clicks_cannot_flip_recommendations(self):
+        loved = [ev(4, E.LIKE), ev(4, E.SAVE), ev(7, E.LIKE), ev(7, E.SAVE)]
+        once = top_ids(loved + [ev(1, E.COMPLETE)])
+        spammed = top_ids(loved + [ev(1, E.COMPLETE) for _ in range(5)])
+        assert once == spammed
+
+    def test_a_repeat_refreshes_recency(self):
+        assert profile_of(ev(1, E.SAVE, 60), ev(1, E.SAVE, 0)).item_affinity[1] == 4.0
+
+    def test_saving_again_after_unsaving_counts_once(self):
+        profile = profile_of(ev(1, E.SAVE, 3), ev(1, E.UNSAVE, 2), ev(1, E.SAVE, 0))
+        assert 1 in profile.saved and profile.item_affinity[1] == 4.0
+
+    def test_like_replaces_dislike_and_vice_versa(self):
+        assert profile_of(ev(1, E.DISLIKE, 2), ev(1, E.LIKE, 0)).item_affinity[1] == 5.0
+        assert profile_of(ev(1, E.LIKE, 2), ev(1, E.DISLIKE, 0)).item_affinity[1] == -5.0
+
+    @pytest.mark.parametrize("positive", [E.SAVE, E.LIKE, E.COMPLETE])
+    def test_a_positive_action_clears_an_earlier_skip(self, positive):
+        assert profile_of(ev(1, E.SKIP, 2), ev(1, positive, 0)).item_affinity[1] > 0
 
     def test_unlike_removes_like(self):
         profile = profile_of(ev(1, E.LIKE, 2), ev(1, E.UNLIKE, 1))
@@ -314,7 +345,18 @@ class TestScoring:
         assert popularity(BY_ID[2], {}) == 0.0
 
     def test_count_fans_counts_distinct_users(self):
-        assert count_fans([(1, 10), (1, 10), (2, 10), (3, 11)]) == {10: 2, 11: 1}
+        rows = [(1, 10, E.SAVE, NOW), (1, 10, E.LIKE, NOW), (2, 10, E.COMPLETE, NOW), (3, 11, E.LIKE, NOW)]
+        assert count_fans(rows) == {10: 2, 11: 1}
+
+    @pytest.mark.parametrize("positive, reversal", [(E.SAVE, E.UNSAVE), (E.LIKE, E.UNLIKE), (E.LIKE, E.DISLIKE)])
+    def test_a_reversal_removes_a_fan(self, positive, reversal):
+        assert count_fans([(1, 10, positive, NOW), (1, 10, reversal, NOW)]) == {}
+
+    def test_a_fan_with_another_positive_stays_a_fan(self):
+        assert count_fans([(1, 10, E.SAVE, NOW), (1, 10, E.LIKE, NOW), (1, 10, E.UNSAVE, NOW)]) == {10: 1}
+
+    def test_views_do_not_make_a_fan(self):
+        assert count_fans([(1, 10, E.VIEW, NOW), (1, 10, E.CLICK, NOW)]) == {}
 
 
 class TestReasons:

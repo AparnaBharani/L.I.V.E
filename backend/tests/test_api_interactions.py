@@ -138,6 +138,42 @@ class TestInvalidInteractions:
         assert response.status_code == 404
 
 
+class TestInteractionState:
+    def state(self, client, user):
+        response = client.get(f"{url(user.id)}/state")
+        assert response.status_code == 200
+        return response.json()
+
+    def test_empty_for_a_new_user(self, client, user):
+        assert self.state(client, user) == []
+
+    def test_views_alone_are_not_state(self, client, user, experience):
+        client.post(url(user.id), json={"event_type": "view", "experience_id": experience.id})
+        assert self.state(client, user) == []
+
+    def test_reports_current_state_after_reversals(self, client, user, make_experience):
+        kept, undone = make_experience(), make_experience()
+        for exp, event in [(kept, "save"), (kept, "like"), (undone, "save"), (undone, "unsave")]:
+            client.post(url(user.id), json={"event_type": event, "experience_id": exp.id})
+
+        assert self.state(client, user) == [{
+            "experience_id": kept.id, "saved": True, "liked": True,
+            "disliked": False, "completed": False, "skipped": False,
+        }]
+
+    def test_sees_events_older_than_any_single_history_page(self, client, db_session, user, make_experience):
+        saved, busy = make_experience(), make_experience()
+        client.post(url(user.id), json={"event_type": "save", "experience_id": saved.id})
+        for _ in range(150):
+            db_session.add(Interaction(user_id=user.id, experience_id=busy.id, event_type="view"))
+        db_session.flush()
+
+        assert [s["experience_id"] for s in self.state(client, user)] == [saved.id]
+
+    def test_nonexistent_user_returns_404(self, client, nonexistent_id):
+        assert client.get(f"{url(nonexistent_id)}/state").status_code == 404
+
+
 class TestListInteractions:
     @pytest.fixture
     def add_event(self, db_session, user, experience):

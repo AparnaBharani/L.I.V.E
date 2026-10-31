@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { actAs, createUser, events, eventTypes, firstExperience, seededUser } from "./helpers";
+import { actAs, API_URL, createUser, events, eventTypes, firstExperience, seededUser } from "./helpers";
 
 test("save, like and complete update the buttons and reach the history", async ({ page, request }) => {
   const user = await createUser(request);
@@ -61,6 +61,46 @@ test("events carry where they came from and never a client-chosen identity", asy
 
   expect(Object.keys(body).sort()).toEqual(["event_type", "experience_id", "properties"]);
   await expect.poll(async () => (await events(request, user.id))[0]?.properties).toEqual({ source: "detail_page" });
+});
+
+test("one-way actions lock, so a second click cannot add another event", async ({ page, request }) => {
+  const user = await createUser(request);
+  const experience = await firstExperience(request);
+  await actAs(page, user.id);
+  await page.goto(`/experiences/${experience.id}`);
+
+  await page.locator('[data-event="complete"]').click();
+  await expect(page.locator('[data-event="complete"]')).toBeDisabled();
+  await page.locator('[data-event="dislike"]').click();
+  await expect(page.locator('[data-event="dislike"]')).toBeDisabled();
+  await page.locator('[data-event="skip"]').click();
+  await expect(page.locator('[data-event="skip"]')).toHaveText("Skipped");
+  await expect(page.locator('[data-event="skip"]')).toBeDisabled();
+
+  await expect.poll(() => eventTypes(request, user.id)).toEqual(["skip", "dislike", "complete", "view"]);
+});
+
+test("state and history are complete beyond a single page of events", async ({ page, request }) => {
+  const user = await createUser(request);
+  const experience = await firstExperience(request);
+  const post = (event_type: string) =>
+    request.post(`${API_URL}/users/${user.id}/interactions`, { data: { event_type, experience_id: experience.id } });
+
+  await post("save"); // the oldest event: beyond the newest 100
+  for (let i = 0; i < 110; i++) await post("view");
+
+  await actAs(page, user.id);
+  await page.goto(`/experiences/${experience.id}`);
+  await expect(page.locator('[data-event="unsave"]')).toHaveText("Saved ✓");
+
+  await page.goto("/history");
+  await expect(page.locator("[data-event-row]")).toHaveCount(50);
+  await page.getByRole("button", { name: "Load more" }).click();
+  await expect(page.locator("[data-event-row]")).toHaveCount(100);
+  await page.getByRole("button", { name: "Load more" }).click();
+  await expect(page.locator("[data-event-row]")).toHaveCount(112); // 111 + the detail page view
+  await expect(page.getByRole("button", { name: "Load more" })).toHaveCount(0);
+  await expect(page.locator("[data-event-row]").last()).toHaveAttribute("data-event-row", "save");
 });
 
 test("switching demo users shows separate histories", async ({ page, request }) => {

@@ -2,11 +2,12 @@
 
 from typing import Annotated, TypeVar
 
-from fastapi import Depends, HTTPException, Query, status
+from fastapi import Depends, HTTPException, Path, Query, status
 from sqlalchemy.orm import Session
 
 from app.database import Base, get_db
 from app.models import User
+from app.schemas import MAX_INT
 
 # Writing `db: DbSession` in a route means "FastAPI, call get_db() and give me the session".
 # Within one request FastAPI calls get_db only once, so every dependency shares the same session.
@@ -14,7 +15,10 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 # Pagination for list endpoints, e.g. GET /experiences?limit=20&offset=40
 Limit = Annotated[int, Query(ge=1, le=100)]
-Offset = Annotated[int, Query(ge=0)]
+Offset = Annotated[int, Query(ge=0, le=MAX_INT)]
+
+# An id in the URL. Anything larger cannot exist and would overflow the database query.
+EntityId = Annotated[int, Path(le=MAX_INT)]
 
 ModelT = TypeVar("ModelT", bound=Base)
 
@@ -30,7 +34,7 @@ def get_or_404(db: Session, model: type[ModelT], obj_id: int) -> ModelT:
     return obj
 
 
-def get_existing_user(user_id: int, db: DbSession) -> User:
+def get_existing_user(user_id: EntityId, db: DbSession) -> User:
     # FastAPI fills user_id from the path parameter of the same name.
     return get_or_404(db, User, user_id)
 

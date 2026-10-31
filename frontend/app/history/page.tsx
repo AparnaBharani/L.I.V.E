@@ -3,13 +3,13 @@
 import Link from "next/link";
 import { useDemoUser } from "@/components/DemoUserProvider";
 import { Empty, ErrorMessage, Loading } from "@/components/Status";
-import { useActivity } from "@/components/useActivity";
 import { useExperiences } from "@/components/useExperiences";
+import { useHistory } from "@/components/useHistory";
 import { formatTimestamp } from "@/lib/format";
 
 export default function HistoryPage() {
   const { user } = useDemoUser();
-  const { interactions, loading, error } = useActivity(user?.id ?? null);
+  const { interactions, hasMore, loadMore, loadingMore, loading, error } = useHistory(user?.id ?? null);
   const { experiences } = useExperiences();
   const titles = new Map((experiences ?? []).map((e) => [e.id, e.title]));
 
@@ -18,7 +18,7 @@ export default function HistoryPage() {
       <h1 className="text-2xl font-bold">Interaction history</h1>
       <p className="mt-1 text-sm text-zinc-600">
         The event log for <strong>{user?.username ?? "…"}</strong>, newest first, exactly as stored by{" "}
-        <code>GET /users/{user?.id ?? "{id}"}/interactions</code> (latest 100).
+        <code>GET /users/{user?.id ?? "{id}"}/interactions</code>.
       </p>
 
       <section className="mt-6">
@@ -57,6 +57,16 @@ export default function HistoryPage() {
               ))}
             </tbody>
           </table>
+        )}
+        {hasMore && (
+          <button
+            type="button"
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="mt-4 rounded border border-zinc-300 px-3 py-1.5 text-sm hover:border-zinc-900 disabled:opacity-50"
+          >
+            {loadingMore ? "Loading…" : "Load more"}
+          </button>
         )}
       </section>
     </main>

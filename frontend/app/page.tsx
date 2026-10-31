@@ -39,11 +39,10 @@ export default function CataloguePage() {
   return (
     <main className="mx-auto w-full max-w-6xl px-4 py-6">
       {activity.error && <ErrorMessage message={`Could not load your activity: ${activity.error}`} />}
-      {/* Wait for the history so the first recommendation request already sees the latest event. */}
-      {user && activity.interactions !== null && (
+      {user && activity.ready && (
         <ForYou
           userId={user.id}
-          latestEventId={activity.interactions?.[0]?.id ?? null}
+          refreshKey={activity.version}
           states={activity.states}
           record={activity.record}
         />

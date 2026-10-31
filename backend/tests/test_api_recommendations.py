@@ -132,6 +132,20 @@ class TestCandidatesAndFeedback:
         assert "you saved this earlier" in top["reasons"]
 
 
+class TestPopularityFollowsReversals:
+    def test_an_unsaved_experience_loses_its_popularity(self, client, make_user, catalogue, add_events):
+        kept, abandoned = catalogue["social"][0], catalogue["learning"][0]
+        for _ in range(2):
+            fan = make_user()
+            add_events(fan, (kept, "save", 3), (abandoned, "save", 3), (abandoned, "unsave", 1))
+
+        items = recs(client, make_user(), limit=50)["items"]
+
+        popularity = {i["experience"]["id"]: i["features"]["popularity"] for i in items}
+        assert popularity[kept.id] == 1.0
+        assert popularity[abandoned.id] == 0.0
+
+
 class TestContract:
     def test_response_schema(self, client, user, catalogue, add_events):
         add_events(user, (catalogue["outdoors"][0], "like", 1))
