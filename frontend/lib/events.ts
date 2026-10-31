@@ -1,6 +1,6 @@
-// Event tracking: turning UI actions into V1 interaction events, and turning the
-// event log back into "what is currently saved/liked/...".
-import type { EventProperties, EventType, Interaction } from "./types";
+// Event tracking: turning UI actions into interaction events, and keeping the
+// "what is currently saved/liked/..." state up to date as they happen.
+import type { EventProperties, EventType, ExperienceStateRow } from "./types";
 
 export type ExperienceEvent = Exclude<EventType, "search">;
 
@@ -25,21 +25,24 @@ export const EMPTY_STATE: ExperienceState = {
   skipped: false,
 };
 
-/** Apply one event to an experience's state. Same rules the backend log implies. */
+/**
+ * Apply one new event to an experience's state, so the UI updates without a refetch.
+ * The backend's recommender/state.py defines these rules; this must stay in step with it.
+ */
 export function applyEvent(state: ExperienceState, type: EventType): ExperienceState {
   switch (type) {
     case "save":
-      return { ...state, saved: true };
+      return { ...state, saved: true, skipped: false };
     case "unsave":
       return { ...state, saved: false };
     case "like":
-      return { ...state, liked: true, disliked: false };
+      return { ...state, liked: true, disliked: false, skipped: false };
     case "unlike":
       return { ...state, liked: false };
     case "dislike":
       return { ...state, disliked: true, liked: false };
     case "complete":
-      return { ...state, completed: true };
+      return { ...state, completed: true, skipped: false };
     case "skip":
       return { ...state, skipped: true };
     default:
@@ -47,16 +50,6 @@ export function applyEvent(state: ExperienceState, type: EventType): ExperienceS
   }
 }
 
-/** Replay an (unordered) event log into per-experience state. Latest event wins. */
-export function deriveState(interactions: Interaction[]): Map<number, ExperienceState> {
-  const ordered = [...interactions].sort(
-    (a, b) => Date.parse(a.occurred_at) - Date.parse(b.occurred_at) || a.id - b.id,
-  );
-  const states = new Map<number, ExperienceState>();
-  for (const event of ordered) {
-    if (event.experience_id === null) continue;
-    const current = states.get(event.experience_id) ?? EMPTY_STATE;
-    states.set(event.experience_id, applyEvent(current, event.event_type));
-  }
-  return states;
+export function toStateMap(rows: ExperienceStateRow[]): Map<number, ExperienceState> {
+  return new Map(rows.map(({ experience_id, ...state }) => [experience_id, state]));
 }

@@ -1,5 +1,13 @@
 // The only place the frontend talks HTTP to the backend.
-import type { Experience, Interaction, NewInteraction, RecommendationsResponse, User } from "./types";
+import type {
+  Experience,
+  ExperienceStateRow,
+  Interaction,
+  NewInteraction,
+  RecommendationsResponse,
+  SearchResponse,
+  User,
+} from "./types";
 
 // Inlined at build time by Next.js (NEXT_PUBLIC_ prefix). See frontend/.env.example.
 export const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
@@ -37,14 +45,32 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
+const MAX_PAGE_SIZE = 100;
+
+/** Follow limit/offset until a short page, so a list is never silently cut off. */
+async function fetchAllPages<T>(path: string): Promise<T[]> {
+  const items: T[] = [];
+  for (let offset = 0; ; offset += MAX_PAGE_SIZE) {
+    const page = await request<T[]>(`${path}?limit=${MAX_PAGE_SIZE}&offset=${offset}`);
+    items.push(...page);
+    if (page.length < MAX_PAGE_SIZE) return items;
+  }
+}
+
 export const api = {
-  listUsers: () => request<User[]>("/users?limit=100"),
-  listExperiences: () => request<Experience[]>("/experiences?limit=100"),
+  listUsers: () => fetchAllPages<User>("/users"),
+  listExperiences: () => fetchAllPages<Experience>("/experiences"),
   getExperience: (id: number) => request<Experience>(`/experiences/${id}`),
-  getRecommendations: (userId: number, limit = 6) =>
-    request<RecommendationsResponse>(`/users/${userId}/recommendations?limit=${limit}`),
-  listInteractions: (userId: number) =>
-    request<Interaction[]>(`/users/${userId}/interactions?limit=100`),
+  search: (query: string, limit = 30) =>
+    request<SearchResponse>(`/search?q=${encodeURIComponent(query)}&limit=${limit}`),
+  getRecommendations: (userId: number, limit = 6, query?: string) =>
+    request<RecommendationsResponse>(
+      `/users/${userId}/recommendations?limit=${limit}${query ? `&q=${encodeURIComponent(query)}` : ""}`,
+    ),
+  listInteractions: (userId: number, limit: number, offset: number) =>
+    request<Interaction[]>(`/users/${userId}/interactions?limit=${limit}&offset=${offset}`),
+  getInteractionState: (userId: number) =>
+    request<ExperienceStateRow[]>(`/users/${userId}/interactions/state`),
   createInteraction: (userId: number, event: NewInteraction) =>
     request<Interaction>(`/users/${userId}/interactions`, {
       method: "POST",

@@ -18,6 +18,21 @@ class RequestSchema(BaseModel):
     # are rejected instead of silently ignored.
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
+    @model_validator(mode="before")
+    @classmethod
+    def reject_nul_characters(cls, data: Any) -> Any:
+        # PostgreSQL text cannot store NUL, so it must stop here rather than crash the driver.
+        def contains_nul(value: Any) -> bool:
+            if isinstance(value, str):
+                return "\x00" in value
+            if isinstance(value, dict):
+                return any(contains_nul(k) or contains_nul(v) for k, v in value.items())
+            return False
+
+        if contains_nul(data):
+            raise ValueError("text must not contain NUL characters")
+        return data
+
 
 class ResponseSchema(BaseModel):
     # from_attributes: build the response by reading attributes of an ORM object.
@@ -26,8 +41,10 @@ class ResponseSchema(BaseModel):
 
 # strict=True: only real integers. Without it, "120" (a string) and true (a bool)
 # would be silently converted to numbers.
-PositiveInt = Annotated[int, Field(gt=0, strict=True)]
-NonNegativeInt = Annotated[int, Field(ge=0, strict=True)]
+# le: the largest value a PostgreSQL integer column can hold.
+MAX_INT = 2_147_483_647
+PositiveInt = Annotated[int, Field(gt=0, le=MAX_INT, strict=True)]
+NonNegativeInt = Annotated[int, Field(ge=0, le=MAX_INT, strict=True)]
 
 
 # ---------- Experience ----------
@@ -109,6 +126,48 @@ class InteractionResponse(ResponseSchema):
     query_text: str | None
     properties: dict[str, Any] | None
     occurred_at: datetime
+
+
+# ---------- Search ----------
+
+class ParsedQueryResponse(BaseModel):
+    """How the query was understood, so the UI can show it and people can correct it."""
+
+    text: str = Field(description="What was left to search for after removing constraints and filler.")
+    categories: list[str] = Field(description="Soft hints read from the query.")
+    category: str | None = Field(description="Hard filter, only ever set explicitly.")
+    difficulty: str | None
+    max_cost: int | None
+    max_duration_minutes: int | None
+
+
+class SearchHitResponse(BaseModel):
+    score: float = Field(description="Reciprocal Rank Fusion score. Comparable only within one result list.")
+    keyword_rank: int | None = Field(description="Rank in full-text search; null if it did not match.")
+    semantic_rank: int | None = Field(description="Rank by meaning; null if it was not close enough.")
+    category_hint: bool
+    experience: ExperienceResponse
+
+
+class SearchResponse(BaseModel):
+    query: str
+    mode: Literal["hybrid", "keyword", "browse"] = Field(
+        description="keyword = the embedding model is unavailable; browse = there was no text to match."
+    )
+    understood: ParsedQueryResponse
+    total: int
+    items: list[SearchHitResponse]
+
+
+class ExperienceStateResponse(BaseModel):
+    """The current meaning of the log for one experience (see recommender/state.py)."""
+
+    experience_id: int
+    saved: bool
+    liked: bool
+    disliked: bool
+    completed: bool
+    skipped: bool
 
 
 # ---------- Recommendation (V2) ----------

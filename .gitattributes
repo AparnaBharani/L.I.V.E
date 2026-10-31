@@ -1,0 +1,4 @@
+# Git stores text with LF line endings, whatever each machine uses locally.
+* text=auto
+*.png binary
+*.ico binary

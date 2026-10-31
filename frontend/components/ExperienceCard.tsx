@@ -16,10 +16,21 @@ interface Props {
   children?: React.ReactNode;
 }
 
+// Written out in full so Tailwind can find the class names when it scans the source.
+const CATEGORY_COLOURS: Record<string, string> = {
+  outdoors: "bg-emerald-100 text-emerald-900",
+  adventure: "bg-orange-100 text-orange-900",
+  creative: "bg-fuchsia-100 text-fuchsia-900",
+  social: "bg-sky-100 text-sky-900",
+  learning: "bg-indigo-100 text-indigo-900",
+  wellness: "bg-teal-100 text-teal-900",
+};
+
 export function ExperienceMeta({ experience }: { experience: Experience }) {
+  const colour = CATEGORY_COLOURS[experience.category] ?? "bg-zinc-200 text-zinc-900";
   return (
     <div className="flex flex-wrap gap-2 text-xs">
-      <span className="rounded bg-zinc-900 px-2 py-0.5 text-white">{experience.category}</span>
+      <span className={`rounded px-2 py-0.5 font-medium ${colour}`}>{experience.category}</span>
       <span className="rounded bg-zinc-100 px-2 py-0.5">{experience.difficulty}</span>
       <span className="rounded bg-zinc-100 px-2 py-0.5">{formatDuration(experience.duration_minutes)}</span>
       <span className="rounded bg-zinc-100 px-2 py-0.5">{formatCost(experience.cost)}</span>
@@ -43,12 +54,14 @@ export function ExperienceActions({ state, onEvent, disabled }: Omit<Props, "exp
     }
   }
 
-  const buttons: { type: ExperienceEvent; label: string; active?: boolean }[] = [
+  // Done, Disliked and Skipped have no undo button, so they lock once applied. Save and
+  // like stay clickable because clicking them again is the undo.
+  const buttons: { type: ExperienceEvent; label: string; active?: boolean; locked?: boolean }[] = [
     state.saved ? { type: "unsave", label: "Saved ✓", active: true } : { type: "save", label: "Save" },
     state.liked ? { type: "unlike", label: "Liked ✓", active: true } : { type: "like", label: "Like" },
-    { type: "dislike", label: state.disliked ? "Disliked" : "Dislike", active: state.disliked },
-    { type: "complete", label: state.completed ? "Done ✓" : "Mark done", active: state.completed },
-    { type: "skip", label: "Not for me" },
+    { type: "dislike", label: state.disliked ? "Disliked" : "Dislike", active: state.disliked, locked: state.disliked },
+    { type: "complete", label: state.completed ? "Done ✓" : "Mark done", active: state.completed, locked: state.completed },
+    { type: "skip", label: state.skipped ? "Skipped" : "Not for me", active: state.skipped, locked: state.skipped },
   ];
 
   return (
@@ -59,7 +72,7 @@ export function ExperienceActions({ state, onEvent, disabled }: Omit<Props, "exp
             key={b.type}
             type="button"
             data-event={b.type}
-            disabled={disabled || pending !== null}
+            disabled={disabled || pending !== null || b.locked}
             onClick={() => send(b.type)}
             className={`rounded border px-2 py-1 text-xs disabled:opacity-50 ${
               b.active ? "border-zinc-900 bg-zinc-900 text-white" : "border-zinc-300 hover:border-zinc-900"

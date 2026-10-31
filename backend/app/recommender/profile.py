@@ -5,10 +5,9 @@ from collections import defaultdict
 from collections.abc import Iterable, Mapping
 from datetime import datetime
 
-from app.enums import EventType as E
-
 from .config import DEFAULT_CONFIG, RecommenderConfig
 from .models import Event, ExperienceInfo, UserProfile
+from .state import replay
 
 
 def recency_weight(occurred_at: datetime, now: datetime, half_life_days: float) -> float:
@@ -18,24 +17,6 @@ def recency_weight(occurred_at: datetime, now: datetime, half_life_days: float) 
     """
     age_days = max(0.0, (now - occurred_at).total_seconds() / 86_400)
     return 0.5 ** (age_days / half_life_days)
-
-
-def _replay_state(profile: UserProfile, experience_id: int, event_type: E) -> None:
-    """Keep current saved/liked/disliked/completed state; the latest event wins."""
-    if event_type is E.SAVE:
-        profile.saved.add(experience_id)
-    elif event_type is E.UNSAVE:
-        profile.saved.discard(experience_id)
-    elif event_type is E.LIKE:
-        profile.liked.add(experience_id)
-        profile.disliked.discard(experience_id)
-    elif event_type is E.UNLIKE:
-        profile.liked.discard(experience_id)
-    elif event_type is E.DISLIKE:
-        profile.disliked.add(experience_id)
-        profile.liked.discard(experience_id)
-    elif event_type is E.COMPLETE:
-        profile.completed.add(experience_id)
 
 
 def build_profile(
@@ -48,19 +29,24 @@ def build_profile(
     category_raw: dict[str, float] = defaultdict(float)
     item_raw: dict[int, float] = defaultdict(float)
 
-    for event in sorted(events, key=lambda e: e.occurred_at):
-        exp = experiences.get(event.experience_id) if event.experience_id is not None else None
-        if exp is None:
-            continue  # search events (no experience) or experiences no longer in the catalogue
-        # signal = how much this event says × how recent it is
-        signal = config.event_weights[event.event_type] * recency_weight(
-            event.occurred_at, now, config.recency_half_life_days
+    # Skips search events (no experience) and experiences no longer in the catalogue.
+    known = [e for e in sorted(events, key=lambda e: e.occurred_at) if e.experience_id in experiences]
+    profile.signal_count = len(known)
+
+    for experience_id, state in replay((e.experience_id, e.event_type, e.occurred_at) for e in known).items():
+        exp = experiences[experience_id]
+        # signal = how much each event type still in effect says × how recent it is
+        signal = sum(
+            config.event_weights[event_type] * recency_weight(at, now, config.recency_half_life_days)
+            for event_type, at in state.active.items()
         )
         category_raw[exp.category] += signal
         item_raw[exp.id] += signal
         profile.seen.add(exp.id)
-        profile.signal_count += 1
-        _replay_state(profile, exp.id, event.event_type)
+        for flag, members in ((state.saved, profile.saved), (state.liked, profile.liked),
+                              (state.disliked, profile.disliked), (state.completed, profile.completed)):
+            if flag:
+                members.add(exp.id)
 
     # Category affinity in [-1, 1]. Dividing by the strongest category makes long and short
     # histories comparable; the evidence floor stops one weak event from looking like certainty.

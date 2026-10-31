@@ -58,6 +58,7 @@ from sqlalchemy import create_engine, text  # noqa: E402
 
 from app.database import SessionLocal, engine, get_db  # noqa: E402
 from app.main import app  # noqa: E402
+from app.search.embedding import get_embedder  # noqa: E402
 from app.models import Experience, User  # noqa: E402
 
 assert engine.url.database == TEST_DATABASE_NAME, "app engine is not using the test database"
@@ -106,6 +107,8 @@ def db_session(test_database):
 def client(db_session):
     """An HTTP client for the app, wired to the test's db_session instead of get_db."""
     app.dependency_overrides[get_db] = lambda: db_session
+    # No real model in API tests; tests/test_search.py installs a small fake where needed.
+    app.dependency_overrides[get_embedder] = lambda: None
     with TestClient(app) as test_client:
         yield test_client
     app.dependency_overrides.clear()

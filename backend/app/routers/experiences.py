@@ -1,7 +1,7 @@
 from fastapi import APIRouter, status
 from sqlalchemy import select
 
-from app.dependencies import DbSession, Limit, Offset, get_or_404
+from app.dependencies import DbSession, EntityId, Limit, Offset, get_or_404
 from app.models import Experience
 from app.schemas import ExperienceCreate, ExperienceResponse
 
@@ -24,5 +24,5 @@ def list_experiences(db: DbSession, limit: Limit = 50, offset: Offset = 0):
 
 
 @router.get("/{experience_id}", response_model=ExperienceResponse)
-def get_experience(experience_id: int, db: DbSession):
+def get_experience(experience_id: EntityId, db: DbSession):
     return get_or_404(db, Experience, experience_id)

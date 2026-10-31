@@ -2,7 +2,7 @@
 
 // V2 "For You": recommendations from GET /users/{id}/recommendations.
 // Interacting with a recommended card records a normal V1 event (source "recommendations"),
-// which changes the user's newest event id, which refetches the recommendations:
+// which changes refreshKey, which refetches the recommendations:
 //   recommendation → interaction → new event → updated profile → new recommendation
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
@@ -13,8 +13,8 @@ import { ErrorMessage, Loading } from "./Status";
 
 interface Props {
   userId: number;
-  /** Id of the user's newest event; when it changes, recommendations are refreshed. */
-  latestEventId: number | null;
+  /** Changes whenever the user records an event, which refreshes the recommendations. */
+  refreshKey: number;
   states: Map<number, ExperienceState>;
   record: (event: NewInteraction) => Promise<unknown>;
 }
@@ -24,8 +24,8 @@ interface Loaded {
   data: RecommendationsResponse;
 }
 
-export function ForYou({ userId, latestEventId, states, record }: Props) {
-  const key = `${userId}:${latestEventId}`;
+export function ForYou({ userId, refreshKey, states, record }: Props) {
+  const key = `${userId}:${refreshKey}`;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [error, setError] = useState<{ key: string; message: string } | null>(null);
 
@@ -53,7 +53,7 @@ export function ForYou({ userId, latestEventId, states, record }: Props) {
       <p className="text-xs text-zinc-500">
         {coldStart
           ? "No activity yet, so these are ranked by popularity and freshness, not by your taste. Interact with anything to personalise them."
-          : "Ranked by the V2 rule-based recommender from your saves, likes, completions, skips and views."}
+          : "Based on what you saved, liked, completed and skipped. Each pick says why it is here."}
       </p>
       <div className="mt-3">
         {loadError && <ErrorMessage message={loadError} />}

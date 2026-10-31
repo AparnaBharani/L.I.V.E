@@ -8,3 +8,7 @@ psycopg[binary]
 alembic
 pydantic-settings
 python-dotenv
+# Local ONNX embedding model for semantic search; no API key or per-query cost.
+fastembed
+# Cosine similarity over the stored embeddings.
+numpy

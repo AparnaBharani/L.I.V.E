@@ -1,0 +1,28 @@
+# Render blueprint for the API and its database. The frontend goes on Vercel: see docs/DEPLOYMENT.md.
+databases:
+  - name: live-db
+    databaseName: live_db
+    plan: basic-256mb
+
+services:
+  - type: web
+    name: live-api
+    runtime: python
+    rootDir: backend
+    plan: starter            # 512 MB: the app with the embedding model uses about 300 MB
+    healthCheckPath: /health
+    # Downloads the embedding model at build time, so starting up doesn't depend on the network.
+    buildCommand: pip install -r requirements.txt && python -c "from app.search.embedding import FastEmbedder; FastEmbedder()"
+    # Each step is safe to repeat: migrations apply once, seeding and embedding skip existing rows.
+    startCommand: alembic upgrade head && python -m scripts.seed && python -m scripts.embed_experiences && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.5"
+      - key: FASTEMBED_CACHE_PATH
+        value: .model-cache
+      - key: DATABASE_URL
+        fromDatabase:
+          name: live-db
+          property: connectionString
+      - key: CORS_ORIGINS
+        sync: false          # set to your Vercel URL in the Render dashboard
