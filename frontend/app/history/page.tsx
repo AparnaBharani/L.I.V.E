@@ -17,8 +17,8 @@ export default function HistoryPage() {
     <main className="mx-auto w-full max-w-6xl px-4 py-6">
       <h1 className="text-2xl font-bold">Interaction history</h1>
       <p className="mt-1 text-sm text-zinc-600">
-        The event log for <strong>{user?.username ?? "…"}</strong>, newest first, exactly as stored by{" "}
-        <code>GET /users/{user?.id ?? "{id}"}/interactions</code>.
+        Everything <strong>{user?.username ?? "…"}</strong> has done, newest first. This log is what
+        recommendations are built from.
       </p>
 
       <section className="mt-6">
@@ -29,7 +29,8 @@ export default function HistoryPage() {
           <Empty>No interactions yet: this is a cold-start user. Actions in the catalogue will appear here.</Empty>
         )}
         {interactions && interactions.length > 0 && (
-          <table className="w-full border-collapse text-left text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-zinc-300 text-xs uppercase text-zinc-500">
                 <th className="py-2 pr-4">When</th>
@@ -57,6 +58,7 @@ export default function HistoryPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
         {hasMore && (
           <button

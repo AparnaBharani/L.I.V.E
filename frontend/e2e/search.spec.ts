@@ -58,6 +58,12 @@ test("acting on a result records where it came from", async ({ page, request }) 
   await expect.poll(async () => (await events(request, userId))[0]?.properties).toEqual({ source: "search", position: 0 });
 });
 
+test("an example search runs in one click", async ({ page }) => {
+  await page.getByTestId("examples").getByRole("button", { name: "ceramics" }).click();
+  await expect(results(page).getByRole("link", { name: "Beginner pottery wheel class" })).toBeVisible();
+  await expect(page.getByLabel("Search experiences")).toHaveValue("ceramics");
+});
+
 test("no results explains itself", async ({ page }) => {
   await search(page, "kubernetes cluster upgrade");
   await expect(page.getByText("Nothing matches")).toBeVisible();

@@ -16,10 +16,21 @@ interface Props {
   children?: React.ReactNode;
 }
 
+// Written out in full so Tailwind can find the class names when it scans the source.
+const CATEGORY_COLOURS: Record<string, string> = {
+  outdoors: "bg-emerald-100 text-emerald-900",
+  adventure: "bg-orange-100 text-orange-900",
+  creative: "bg-fuchsia-100 text-fuchsia-900",
+  social: "bg-sky-100 text-sky-900",
+  learning: "bg-indigo-100 text-indigo-900",
+  wellness: "bg-teal-100 text-teal-900",
+};
+
 export function ExperienceMeta({ experience }: { experience: Experience }) {
+  const colour = CATEGORY_COLOURS[experience.category] ?? "bg-zinc-200 text-zinc-900";
   return (
     <div className="flex flex-wrap gap-2 text-xs">
-      <span className="rounded bg-zinc-900 px-2 py-0.5 text-white">{experience.category}</span>
+      <span className={`rounded px-2 py-0.5 font-medium ${colour}`}>{experience.category}</span>
       <span className="rounded bg-zinc-100 px-2 py-0.5">{experience.difficulty}</span>
       <span className="rounded bg-zinc-100 px-2 py-0.5">{formatDuration(experience.duration_minutes)}</span>
       <span className="rounded bg-zinc-100 px-2 py-0.5">{formatCost(experience.cost)}</span>
